@@ -457,6 +457,11 @@ class KernelGradientTestsContinuous(unittest.TestCase):
         k = GPy.kern.Poly(self.D, order=5)
         k.randomize()
         self.assertTrue(check_kernel_gradient_functions(k, X=self.X, X2=self.X2, verbose=verbose))
+    
+    def test_LegendrePolynomial(self):
+        k = GPy.kern.LegendrePolynomial(self.D)
+        k.randomize()
+        self.assertTrue(check_kernel_gradient_functions(k, X=self.X, X2=self.X2, verbose=verbose))
 
     def test_WhiteHeteroscedastic(self):
         k = GPy.kern.WhiteHeteroscedastic(self.D, self.X.shape[0])
