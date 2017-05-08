@@ -114,7 +114,7 @@ class GaussianGridInference(LatentFunctionInference):
 
         # Saatci 11 (extended)
         dKd_dTheta = [kern.parts[d].dK_dtheta(xg[d]) for d in range(D)]
-        import pdb; pdb.set_trace()
+
         # Loop over theta i (flattened) (could be replaced by a double loop)
             # gam = 1 (cumulative)
             # Loop over kernels d
@@ -175,14 +175,13 @@ class GaussianGridInference(LatentFunctionInference):
         is_lengthscale = ['lengthscale' in param_name for param_name in kern.parameter_names()]
         is_variance = ['variance' in param_name for param_name in kern.parameter_names()]
 
-        #import pdb; pdb.set_trace()
         dL_dLen = gradients[np.nonzero(is_lengthscale)]
-        dL_dVar = gradients[0] #np.prod(gradients[np.nonzero(is_variance)]) 
-        #dL_dThetaL = 0 #np.identity(D) #derivative wrt noise
-        # separate derivatives
-#        dL_dLen = derivs[:D]
-#        dL_dVar = derivs[D]
-#        dL_dThetaL = derivs[D+1]
+
+        dL_dVar_part = gradients[np.nonzero(is_variance)]
+        var_parts = kern.param_array[np.nonzero(is_variance)]
+        dVar_part_dVar_product = 1./D * var_parts ** (1 - D)
+        dL_dVar = np.dot(dL_dVar_part, dVar_part_dVar_product)
+
         return {'dL_dLen': dL_dLen,
                 'dL_dVar': dL_dVar,
                 'dL_dthetaL': dL_dNoise_variance}

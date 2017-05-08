@@ -62,7 +62,8 @@ class GridRBF(GridKern):
         super(GridRBF, self).__init__(input_dim, variance, lengthscale, ARD, active_dims, name, originalDimensions, useGPU=useGPU)
 
     def K_of_r(self, r):
-        return (self.variance**(float(1)/self.originalDimensions)) * np.exp(-0.5 *  r**2)
+#       return (self.variance**(float(1)/self.originalDimensions)) * np.exp(-0.5 *  r**2)
+        return self.variance * np.exp(-0.5 *  r**2)
 
     def dKdVar_of_r(self, r):
         """
@@ -77,11 +78,11 @@ class GridRBF(GridKern):
         the dimension of the kernel whose derivate is being computed. 
         """
         if (dimCheck == True):
-            #return (self.variance**(float(1)/self.originalDimensions)) * np.exp(-0.5 * r**2) * (r**2) / (lengthscale**(float(1)/self.originalDimensions))
-            return (self.variance**(float(1)/self.originalDimensions)) * np.exp(-0.5 * r**2) * (r**2) / lengthscale
+#           return (self.variance**(float(1)/self.originalDimensions)) * np.exp(-0.5 * r**2) * (r**2) / lengthscale
+            return self.variance * np.exp(-0.5 * r**2) * (r**2) / lengthscale
         else:
-            #return (self.variance**(float(1)/self.originalDimensions)) * np.exp(-0.5 * r**2) / (lengthscale**(float(1)/self.originalDimensions))
-            return (self.variance**(float(1)/self.originalDimensions)) * np.exp(-0.5 * r**2) / lengthscale
+#           return (self.variance**(float(1)/self.originalDimensions)) * np.exp(-0.5 * r**2) / lengthscale
+            return self.variance * np.exp(-0.5 * r**2) / lengthscale
 
     def dK_dr(self, r):
         return -r*self.K_of_r(r)
