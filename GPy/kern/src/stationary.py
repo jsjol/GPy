@@ -2,6 +2,7 @@
 # Licensed under the BSD 3-clause license (see LICENSE.txt)
 
 
+from functools import reduce
 import numpy as np
 from scipy import integrate
 from .kern import Kern
@@ -338,7 +339,27 @@ class Stationary(Kern):
         """
         raise NotImplementedError("implement one dimensional variation of kernel")
 
+    def as_product_kernel(self):
+        """
+        Specially intended for Grid regression.
+        """
+        D = self.input_dim
+        #variance_per_factor = self.variance.copy() ** (1./D) # This breaks consistency with current implementation
+        if self.ARD:
+            oneDkernels = [self.get_one_dimensional_kernel(
+                            D,
+                            # variance=variance_per_factor,
+                            lengthscale=self.lengthscale[d].copy()
+                            ) for d in range(D)]
+        else:
+            oneDkernels = [self.get_one_dimensional_kernel(
+                            D,
+                            # variance=variance_per_factor,
+                            lengthscale=self.lengthscale.copy()
+                            ) for d in range(D)]
 
+        # Return product of all kernels in list
+        return reduce((lambda kern1, kern2: kern1 * kern2), oneDkernels)
 
 
 class Exponential(Stationary):

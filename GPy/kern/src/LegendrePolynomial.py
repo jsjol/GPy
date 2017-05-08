@@ -66,14 +66,25 @@ class LegendrePolynomial(Kern):
         c[np.array(self.orders)] = self.coefficients.values
         return V, c
 
+    @Cache_this(limit=3)
+    def dK_dtheta(self, X, X2=None):
+        V, _ = self._getVandermondeMatrixAndCoefficients(X, X2)
+        V = V[:, :, self.orders]
+        return V
+
     def Kdiag(self, X):
         return self.K(X).diagonal()
 
     def update_gradients_full(self, dL_dK, X, X2=None):
-        V, _ = self._getVandermondeMatrixAndCoefficients(X, X2)
-        V = V[:, :, self.orders]
-        dL_dCoefficients = dL_dK[:, :, np.newaxis] * V
+        dK_dCoefficients = self.dK_dtheta(X, X2)
+        dL_dCoefficients = dL_dK[:, :, np.newaxis] * dK_dCoefficients
         self.coefficients.gradient = np.sum(dL_dCoefficients, axis=(0, 1))
+
+    def update_gradients_direct(self, dL_dCoefficients):
+        """
+        Specially intended for the Grid regression case.
+        """
+        self.coefficients.gradient = dL_dCoefficients
 
     def update_gradients_diag(self, dL_dKdiag, X):
         raise NotImplementedError

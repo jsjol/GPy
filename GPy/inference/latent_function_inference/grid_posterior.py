@@ -14,7 +14,7 @@ class GridPosterior(object):
     schemes and the model classes.
 
     """
-    def __init__(self, alpha_kron=None, QTs=None, Qs=None, V_kron=None):
+    def __init__(self, alpha_kron=None, QTs=None, Qs=None, V_kron=None, noise=None):
         """
         alpha_kron : 
         QTs : transpose of eigen vectors resulting from decomposition of single dimension covariance matrices
@@ -32,6 +32,7 @@ class GridPosterior(object):
         self._qTs = QTs
         self._qs = Qs
         self._v_kron = V_kron
+        self._noise = noise
 
     @property
     def alpha(self):
@@ -59,4 +60,11 @@ class GridPosterior(object):
         kronecker product of eigenvalues s
         """
         return self._v_kron
+
+    @property
+    def noise(self):
+        """
+        kronecker product of eigenvalues s
+        """
+        return self._noise
     
