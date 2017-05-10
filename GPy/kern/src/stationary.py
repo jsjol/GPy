@@ -344,18 +344,27 @@ class Stationary(Kern):
         Specially intended for Grid regression.
         """
         D = self.input_dim
-        #variance_per_factor = self.variance.copy() ** (1./D) # This breaks consistency with current implementation
+
+        if D == 1:
+            return self
+
+        if self.active_dims is None:
+            active_dims = np.arange(D)
+        else:
+            active_dims = self.active_dims
+        active_dims = [[active_dims[d]] for d in range(D)]
+
         if self.ARD:
             oneDkernels = [self.get_one_dimensional_kernel(
                             D,
-                            # variance=variance_per_factor,
-                            lengthscale=self.lengthscale[d].copy()
+                            lengthscale=self.lengthscale[d].copy(),
+                            active_dims=active_dims[d],
                             ) for d in range(D)]
         else:
             oneDkernels = [self.get_one_dimensional_kernel(
                             D,
-                            # variance=variance_per_factor,
-                            lengthscale=self.lengthscale.copy()
+                            lengthscale=self.lengthscale.copy(),
+                            active_dims=active_dims[d],
                             ) for d in range(D)]
 
         # Return product of all kernels in list

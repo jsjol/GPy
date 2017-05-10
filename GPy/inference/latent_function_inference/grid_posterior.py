@@ -14,7 +14,7 @@ class GridPosterior(object):
     schemes and the model classes.
 
     """
-    def __init__(self, alpha_kron=None, QTs=None, Qs=None, V_kron=None, noise=None):
+    def __init__(self, alpha_kron=None, Qs=None, V_kron=None, noise=None):
         """
         alpha_kron : 
         QTs : transpose of eigen vectors resulting from decomposition of single dimension covariance matrices
@@ -22,14 +22,13 @@ class GridPosterior(object):
         V_kron : kronecker product of eigenvalues reulting decomposition of single dimension covariance matrices
         """
 
-        if ((alpha_kron is not None) and (QTs is not None) 
-            and (Qs is not None) and (V_kron is not None)):
+        if ((alpha_kron is not None) and (Qs is not None)
+            and (V_kron is not None)):
             pass # we have sufficient to compute the posterior
         else:
             raise ValueError("insufficient information for predictions")
 
         self._alpha_kron = alpha_kron
-        self._qTs = QTs
         self._qs = Qs
         self._v_kron = V_kron
         self._noise = noise
@@ -45,7 +44,7 @@ class GridPosterior(object):
         """
         array of transposed eigenvectors resulting for single dimension covariance
         """
-        return self._qTs
+        return self._qs.T
 
     @property
     def Qs(self):

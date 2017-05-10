@@ -17,6 +17,7 @@
 #}
 
 from functools import reduce
+from itertools import chain
 import numpy as np
 from .grid_posterior import GridPosterior
 from ...kern import Prod, RBF
@@ -34,86 +35,68 @@ class GaussianGridInference(LatentFunctionInference):
     def __init__(self):
         pass
 
-    def kron_mvprod(self, A, b):
-        x = b
-        N = 1
-        D = len(A)
-        G = np.zeros((D, 1))
-        for d in range(0, D):
-            G[d] = len(A[d])
-        N = np.prod(G)
-        for d in range(D-1, -1, -1):
-            X = np.reshape(x, (G[d], np.round(N/G[d])), order='F')
-            Z = np.dot(A[d], X)
-            Z = Z.T
-            x = np.reshape(Z, (-1, 1), order='F')
-        return x
-
     def inference(self, kern, X, likelihood, Y, Y_metadata=None):
 
         """
         Returns a GridPosterior class containing essential quantities of the posterior
         """
 
-        if isinstance(kern, RBF):
-            # Convert the RBF kernel to a product of 1D kernels
-            kern = kern.as_product_kernel()
-        
+        kern = _expand(kern)
+
+        # TODO: better test
         assert isinstance(kern, Prod), \
             "Grid inference only implemented for RBF or product kernel."
 
         N = X.shape[0] #number of training points
         D = kern.num_params #number of kernel factors
 
+        grid_dims = [[0], [1], [2]]
         xg = factor_grid(X) # TODO: make smarter than assuming 1D
+        kern_factors = _get_factorized_kernel(kern, grid_dims)
+        #import pdb; pdb.set_trace()
+        Kds = [kern_factors[d].K(xg[d]) for d in range(D)]
 
-        Kds = np.zeros(D, dtype=object) #vector for holding covariance per dimension
         Qs = np.zeros(D, dtype=object) #vector for holding eigenvectors of covariance per dimension
         QTs = np.zeros(D, dtype=object) #vector for holding transposed eigenvectors of covariance per dimension
         V_kron = 1 # kronecker product of eigenvalues
 
         # This follows algorithm 16 in Saatci (2011)
         
-        # If you could automatically retrieve the hyperparameters of each part
-        # in the (product) kernel, then you could iterate over them. Hopefully
-        # you would also be able to update the gradients of the parameters directly.
-        
         # My current aim is to only make it sufficiently smart to parse if it
         # is a product kernel and then check whether each factor is rbf or 
         # Legendre.           
 
         for d in range(D):  # Saatci 1-4
-            Kds[d] = kern.parts[d].K(xg[d])
-            [V, Q] = np.linalg.eig(Kds[d])
+            [V, Q] = np.linalg.eigh(Kds[d])
             V_kron = np.kron(V_kron, V)
             Qs[d] = Q
             QTs[d] = Q.T
 
         noise = likelihood.variance + 1e-8
 
-        alpha_kron = self.kron_mvprod(QTs, Y)  # Saatci 5
+        alpha_kron = kron_mvprod(QTs, Y)  # Saatci 5 # TODO: Remove the need for stored QTs
         V_kron = V_kron.reshape(-1, 1)
         alpha_kron = alpha_kron / (V_kron + noise)  # Saatci 6
-        alpha_kron = self.kron_mvprod(Qs, alpha_kron)  # Saatci 7
+        alpha_kron = kron_mvprod(Qs, alpha_kron)  # Saatci 7
 
-        posterior = GridPosterior(alpha_kron=alpha_kron, QTs=QTs,
-                                  Qs=Qs, V_kron=V_kron, noise=noise)
+        posterior = GridPosterior(alpha_kron=alpha_kron, Qs=Qs,
+                                  V_kron=V_kron, noise=noise)
 
         log_likelihood = -0.5 * (np.dot(Y.T, posterior.alpha) +
                                  np.sum((np.log(posterior.V_kron +
                                                 posterior.noise))) +
                                  N*np.log(2*np.pi))  # Saatci 8
 
-        gradient_dict = self.compute_gradients(posterior, kern, xg, Kds)
+        gradient_dict = self.compute_gradients(posterior, kern, kern_factors,
+                                               xg, Kds)
 
         return (posterior, log_likelihood, gradient_dict)
 
-    def compute_gradients(self, posterior, kern, xg, Kds):
+    def compute_gradients(self, posterior, kern, kern_factors, xg, Kds):
 
-        D = kern.num_params
+        D = len(kern_factors)
 
-        # Saatci 11 (extended)
-        dKd_dTheta = [kern.parts[d].dK_dtheta(xg[d]) for d in range(D)]
+        dKd_dTheta = [kern_factors[d].dK_dtheta(xg[d]) for d in range(D)]
 
         # Loop over theta i (flattened) (could be replaced by a double loop)
             # gam = 1 (cumulative)
@@ -129,7 +112,7 @@ class GaussianGridInference(LatentFunctionInference):
 
         gradients = np.array([])
         for i in range(D):  # Double loops over theta = theta_ij
-            for j, _ in enumerate(kern.parts[i].param_array):
+            for j, _ in enumerate(kern_factors[i].param_array):
 
                 kappa_parts = []
                 for d in range(D):  # Loop over kernels
@@ -137,43 +120,26 @@ class GaussianGridInference(LatentFunctionInference):
                         kappa_parts.append(dKd_dTheta[i][:, :, j])
                     else:
                         kappa_parts.append(Kds[d])
-                kappa = self.kron_mvprod(kappa_parts, posterior.alpha)
+                kappa = kron_mvprod(kappa_parts, posterior.alpha)
 
                 gamma = compute_gamma(posterior, kappa_parts)
 
                 gradient_ij = dL_dTheta(posterior, kappa, gamma)
                 gradients = np.append(gradients, gradient_ij)
 
-        # Noise variance gradient
+        # Noise variance gradient ---------------
         kappa_parts = [np.identity(xg[d].shape[0]) for d in range(D)]
-        kappa = self.kron_mvprod(kappa_parts, posterior.alpha)
+        kappa = kron_mvprod(kappa_parts, posterior.alpha)
 
         gamma = compute_gamma(posterior, kappa_parts)
 
         dL_dNoise_variance = dL_dTheta(posterior, kappa, gamma)
+        # -----------------------------------------
 
-#        
-#        derivs = np.zeros(D+2, dtype='object')
-#        for t in range(len(derivs)): # Saatci 9: loop over theta with index i
-#            dKd_dTheta = np.zeros(D, dtype='object')
-#            gam = 1
-#            for d in range(D):
-#                
-#                if t < D:
-#                    dKd_dTheta[d] = kern.parts[d].dKd_dLen(xg[d], (t==d), lengthscale=kern.lengthscale[t]) #derivative wrt lengthscale
-#                elif (t == D):
-#                    dKd_dTheta[d] = kern.parts[d].dKd_dVar(xg[d]) #derivative wrt variance
-#                else:
-#                    dKd_dTheta[d] = np.identity(len(xg[d])) #derivative wrt noise
-#                gamma_d = np.diag(np.dot(np.dot(QTs[d], dKd_dTheta[d].T), Qs[d])) # Probably not the most efficient since it first forms the full matrix and then picks out the diagonal
-#                gam = np.kron(gam, gamma_d) # Could use reduce on a list of of gamma_d's instead
-#            
-#            gam = gam.reshape(-1,1)
-#            kappa = self.kron_mvprod(dKd_dTheta, alpha_kron) # Saatci 15
-#            derivs[t] = 0.5*np.dot(alpha_kron.T,kappa) - 0.5*np.sum(gam / (V_kron + noise)) # Saatci 16
-        
-        is_lengthscale = ['lengthscale' in param_name for param_name in kern.parameter_names()]
-        is_variance = ['variance' in param_name for param_name in kern.parameter_names()]
+        is_lengthscale = ['lengthscale' in param_name
+                          for param_name in kern.parameter_names()]
+        is_variance = ['variance' in param_name
+                       for param_name in kern.parameter_names()]
 
         dL_dLen = gradients[np.nonzero(is_lengthscale)]
 
@@ -187,6 +153,123 @@ class GaussianGridInference(LatentFunctionInference):
                 'dL_dthetaL': dL_dNoise_variance}
 
 
+def _get_factorized_kernel(kern, grid_dims):
+    kern_factored = []
+    leftovers = []
+    for i in range(len(kern.parts)):
+        k = kern.parts[i].copy()
+
+        # For correct behavior when passing pre-sliced Xs
+        # TODO: handle the details elsewhere (part of Kern.__init__)
+        k.active_dims = np.arange(k.input_dim, dtype=int)
+        k._all_dims_active = k.active_dims
+
+        if list_in_list(kern.parts[i].active_dims.tolist(), grid_dims):
+            kern_factored.append(k)
+        else:
+            if not leftovers:
+                leftovers = k
+            else:
+                leftovers *= k
+
+    if leftovers:
+        kern_factored.append(leftovers)
+
+    return kern_factored
+
+
+def list_in_list(element, list_to_search):
+    comparison = [element == el for el in list_to_search]
+    return np.any(comparison)
+
+
+def _detect_factorization(kern):
+    """
+    Recursively detect a valid factorization
+    """
+    if isinstance(kern, RBF):
+        return [[kern.active_dims[d]] for d in range(kern.input_dim)]
+    elif isinstance(kern, Prod):
+        L = len(kern.parts)
+        children = [_detect_factorization(kern.parts[d]) for d in range(L)]
+        return list(chain.from_iterable(children))
+    else:
+        return [list(kern.active_dims)]
+
+
+def _expand(kern):
+    """
+    Recursively expand parts that are either RBFs or products themselves
+    """
+
+    if isinstance(kern, RBF):
+        #active_dims_post = [[kern.active_dims[d]] for d in range(kern.input_dim)]
+        return kern.as_product_kernel()
+#        if np.all(np.in1d(active_dims_post, grid_dims)): # can we simply do active_dims_post == grid_dims ?
+#            return kern.as_product_kernel()
+#        else:
+#            return kern
+    elif isinstance(kern, Prod):
+        L = len(kern.parts)
+
+        children = [_expand(kern.parts[d]) for d in range(L)]
+
+        kern_expanded = reduce((lambda child_1, child_2: child_1 * child_2), children)
+        return kern_expanded
+#        active_dims_post = [[kern.parts[d].active_dims] for d in range(L)]
+#        import pdb; pdb.set_trace()
+#        if np.all(np.in1d(active_dims_post, grid_dims)): # can we simply do active_dims_post == grid_dims ?
+#            children = [_expand(kern.parts[d], grid_dims) for d in range(L)]
+#            kern_expanded = reduce((lambda child_1, child_2: child_1.kern * child_2.kern), children)
+#            return kern_expanded
+#        else:
+#            return kern
+    else:
+        return kern
+
+#    if isinstance(kern, RBF):
+#        prod_kern = kern.as_product_kernel()
+#        active_dims = [[kern.active_dims[d]] for d in range(kern.input_dim)]
+#        return kern_wrapper(prod_kern, active_dims)
+#    elif isinstance(kern, Prod):
+#        L = len(kern.parts)
+#        children = [_expand(kern.parts[d]) for d in range(L)]
+#
+#        kern_expanded = reduce((lambda child_1, child_2: child_1.kern * child_2.kern), children)
+#
+#        children_active_dims = [children[d].active_dims for d in range(L)]
+#        active_dims = list(chain.from_iterable(children_active_dims))
+#        return kern_wrapper(kern_expanded, active_dims)
+#    else:
+#        active_dims = [list(kern.active_dims)]
+#        import pdb; pdb.set_trace()
+#        return kern_wrapper(kern, active_dims)
+
+#    if isinstance(kern, RBF):
+#        prod_kern, active_dims = kern.as_product_kernel()
+#        return prod_kern, active_dims
+#    elif isinstance(kern, Prod):
+#        L = len(kern.parts)
+#
+#        #if active_dims_ext is None:
+#        #    active_dims_ext = np.arange(L)
+#
+#        children_expanded = []
+#        active_dim = []
+#        for d in range(L):
+#            child_kern, child_active_dim = _expand(kern.parts[d])
+#            children_expanded.append(child_kern)
+#            active_dim.append(child_active_dim)
+#        #    active_dims = kern.parts[d].active_dims
+#        #active_dims_ext = [[active_dims_ext[d]] for d in range(L)]
+#
+#        #children_expanded = [_expand(kern.parts[d])[0] for d in range(L)]
+#        return (reduce((lambda kern1, kern2: kern1 * kern2), children_expanded),
+#                active_dim)
+#    else:
+#        return kern, kern.active_dims
+
+
 def factor_grid(X):
     """
        Extract the unique values for each dimension
@@ -198,6 +281,26 @@ def factor_grid(X):
         xg.append(unique_elements[:, np.newaxis])
 
     return xg
+
+
+def kron_mvprod(A, b):
+    """
+        Perform the matrix-vector multiplication A*b where the matrix A is
+        given by a Kronecker product.
+    """
+    x = b
+    N = 1
+    D = len(A)
+    G = np.zeros((D, 1))
+    for d in range(0, D):
+        G[d] = len(A[d])
+    N = np.prod(G)
+    for d in range(D-1, -1, -1):
+        X = np.reshape(x, (G[d], np.round(N/G[d])), order='F')
+        Z = np.dot(A[d], X)
+        Z = Z.T
+        x = np.reshape(Z, (-1, 1), order='F')
+    return x
 
 
 def compute_gamma(posterior, kappa_parts):
