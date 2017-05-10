@@ -32,28 +32,28 @@ class GaussianGridInference(LatentFunctionInference):
     the posterior.
 
     """
-    def __init__(self):
-        pass
+    def __init__(self, grid_dims):
+        self.grid_dims = grid_dims
 
     def inference(self, kern, X, likelihood, Y, Y_metadata=None):
 
         """
         Returns a GridPosterior class containing essential quantities of the posterior
         """
+        assert (isinstance(kern, RBF) or isinstance(kern, Prod)), \
+            "Grid inference only implemented for RBF and product kernel."
 
         kern = _expand(kern)
 
-        # TODO: better test
-        assert isinstance(kern, Prod), \
-            "Grid inference only implemented for RBF or product kernel."
+        if self.grid_dims is None:
+            self.grid_dims = [[d] for d in range(X.shape[1])]
 
         N = X.shape[0] #number of training points
-        D = kern.num_params #number of kernel factors
 
-        grid_dims = [[0], [1], [2]]
-        xg = factor_grid(X) # TODO: make smarter than assuming 1D
-        kern_factors = _get_factorized_kernel(kern, grid_dims)
-        #import pdb; pdb.set_trace()
+        xg = factor_grid(X, self.grid_dims) # TODO: make smarter than assuming 1D
+        kern_factors = _get_factorized_kernel(kern, self.grid_dims)
+
+        D = len(kern_factors)
         Kds = [kern_factors[d].K(xg[d]) for d in range(D)]
 
         Qs = np.zeros(D, dtype=object) #vector for holding eigenvectors of covariance per dimension
@@ -93,22 +93,9 @@ class GaussianGridInference(LatentFunctionInference):
         return (posterior, log_likelihood, gradient_dict)
 
     def compute_gradients(self, posterior, kern, kern_factors, xg, Kds):
-
         D = len(kern_factors)
 
-        dKd_dTheta = [kern_factors[d].dK_dtheta(xg[d]) for d in range(D)]
-
-        # Loop over theta i (flattened) (could be replaced by a double loop)
-            # gam = 1 (cumulative)
-            # Loop over kernels d
-                # If theta i belongs to kernel d (this if statement corresponds to the cryptic t==d argument)
-                    # gamma_d = diag(Q'*dK_dtheta_i*Q)
-                    # kappa_array[d] = dK_dtheta_i
-                # else
-                    # gamma_d = diag(Q'*K*Q)
-                    # kappa_array[d] = K
-                # gam = kron(gam, gamma_d)
-            # kappa = mvprod(kappa_array, alpha)        
+        dKd_dTheta = [kern_factors[d].dK_dtheta(xg[d]) for d in range(D)]      
 
         gradients = np.array([])
         for i in range(D):  # Double loops over theta = theta_ij
@@ -153,19 +140,28 @@ class GaussianGridInference(LatentFunctionInference):
                 'dL_dthetaL': dL_dNoise_variance}
 
 
+def _expand(kern):
+    """
+    Recursively expand parts that are either RBFs or products themselves
+    """
+    if isinstance(kern, RBF):
+        return kern.as_product_kernel()
+    elif isinstance(kern, Prod):
+        children = [_expand(kern.parts[d]) for d in range(len(kern.parts))]
+        kern_expanded = reduce((lambda child_1, child_2: child_1 * child_2), children)
+        return kern_expanded
+    else:
+        return kern
+
+
 def _get_factorized_kernel(kern, grid_dims):
     kern_factored = []
     leftovers = []
     for i in range(len(kern.parts)):
         k = kern.parts[i].copy()
 
-        # For correct behavior when passing pre-sliced Xs
-        # TODO: handle the details elsewhere (part of Kern.__init__)
-        k.active_dims = np.arange(k.input_dim, dtype=int)
-        k._all_dims_active = k.active_dims
-
         if list_in_list(kern.parts[i].active_dims.tolist(), grid_dims):
-            kern_factored.append(k)
+            _append(kern_factored, k)
         else:
             if not leftovers:
                 leftovers = k
@@ -173,7 +169,7 @@ def _get_factorized_kernel(kern, grid_dims):
                 leftovers *= k
 
     if leftovers:
-        kern_factored.append(leftovers)
+        _append(kern_factored, leftovers)
 
     return kern_factored
 
@@ -183,104 +179,54 @@ def list_in_list(element, list_to_search):
     return np.any(comparison)
 
 
-def _detect_factorization(kern):
-    """
-    Recursively detect a valid factorization
-    """
-    if isinstance(kern, RBF):
-        return [[kern.active_dims[d]] for d in range(kern.input_dim)]
-    elif isinstance(kern, Prod):
-        L = len(kern.parts)
-        children = [_detect_factorization(kern.parts[d]) for d in range(L)]
-        return list(chain.from_iterable(children))
-    else:
-        return [list(kern.active_dims)]
+def _append(kern_factored, kern_to_append):
+    kern_to_append = _set_active_dims_to_none(kern_to_append)
+    return kern_factored.append(kern_to_append)
 
 
-def _expand(kern):
-    """
-    Recursively expand parts that are either RBFs or products themselves
-    """
+def _set_active_dims_to_none(k):
+    # For correct behavior when passing pre-sliced Xs
+    # TODO: handle the details elsewhere (part of Kern.__init__)
+    k.active_dims = np.arange(k.input_dim, dtype=int)
+    k._all_dims_active = k.active_dims
+    return k
 
-    if isinstance(kern, RBF):
-        #active_dims_post = [[kern.active_dims[d]] for d in range(kern.input_dim)]
-        return kern.as_product_kernel()
-#        if np.all(np.in1d(active_dims_post, grid_dims)): # can we simply do active_dims_post == grid_dims ?
-#            return kern.as_product_kernel()
-#        else:
-#            return kern
-    elif isinstance(kern, Prod):
-        L = len(kern.parts)
 
-        children = [_expand(kern.parts[d]) for d in range(L)]
-
-        kern_expanded = reduce((lambda child_1, child_2: child_1 * child_2), children)
-        return kern_expanded
-#        active_dims_post = [[kern.parts[d].active_dims] for d in range(L)]
-#        import pdb; pdb.set_trace()
-#        if np.all(np.in1d(active_dims_post, grid_dims)): # can we simply do active_dims_post == grid_dims ?
-#            children = [_expand(kern.parts[d], grid_dims) for d in range(L)]
-#            kern_expanded = reduce((lambda child_1, child_2: child_1.kern * child_2.kern), children)
-#            return kern_expanded
-#        else:
-#            return kern
-    else:
-        return kern
-
+#def _detect_factorization(kern):
+#    """
+#    Recursively detect a valid factorization
+#    """
 #    if isinstance(kern, RBF):
-#        prod_kern = kern.as_product_kernel()
-#        active_dims = [[kern.active_dims[d]] for d in range(kern.input_dim)]
-#        return kern_wrapper(prod_kern, active_dims)
+#        return [[kern.active_dims[d]] for d in range(kern.input_dim)]
 #    elif isinstance(kern, Prod):
 #        L = len(kern.parts)
-#        children = [_expand(kern.parts[d]) for d in range(L)]
-#
-#        kern_expanded = reduce((lambda child_1, child_2: child_1.kern * child_2.kern), children)
-#
-#        children_active_dims = [children[d].active_dims for d in range(L)]
-#        active_dims = list(chain.from_iterable(children_active_dims))
-#        return kern_wrapper(kern_expanded, active_dims)
+#        children = [_detect_factorization(kern.parts[d]) for d in range(L)]
+#        return list(chain.from_iterable(children))
 #    else:
-#        active_dims = [list(kern.active_dims)]
-#        import pdb; pdb.set_trace()
-#        return kern_wrapper(kern, active_dims)
-
-#    if isinstance(kern, RBF):
-#        prod_kern, active_dims = kern.as_product_kernel()
-#        return prod_kern, active_dims
-#    elif isinstance(kern, Prod):
-#        L = len(kern.parts)
-#
-#        #if active_dims_ext is None:
-#        #    active_dims_ext = np.arange(L)
-#
-#        children_expanded = []
-#        active_dim = []
-#        for d in range(L):
-#            child_kern, child_active_dim = _expand(kern.parts[d])
-#            children_expanded.append(child_kern)
-#            active_dim.append(child_active_dim)
-#        #    active_dims = kern.parts[d].active_dims
-#        #active_dims_ext = [[active_dims_ext[d]] for d in range(L)]
-#
-#        #children_expanded = [_expand(kern.parts[d])[0] for d in range(L)]
-#        return (reduce((lambda kern1, kern2: kern1 * kern2), children_expanded),
-#                active_dim)
-#    else:
-#        return kern, kern.active_dims
+#        return [list(kern.active_dims)]
 
 
-def factor_grid(X):
+def factor_grid(X, grid_dims):
     """
        Extract the unique values for each dimension
     """
     xg = []
-    D = X.shape[1]
-    for d in range(D):
-        unique_elements = np.unique(X[:, d])
-        xg.append(unique_elements[:, np.newaxis])
-
+    for d in grid_dims:
+        unique_elements = unique_rows(X[:, d])
+        if unique_elements.ndim < 2:
+            unique_elements = unique_elements[:, np.newaxis]
+        xg.append(unique_elements)
     return xg
+
+
+def unique_rows(X):
+    """
+    Copied from http://stackoverflow.com/questions/16970982/find-unique-rows-in-numpy-array
+    This feature will come natively in numpy 1.13
+    """
+    X_view = np.ascontiguousarray(X).view(np.dtype((np.void, X.dtype.itemsize * X.shape[1])))
+    _, idx = np.unique(X_view, return_index=True)
+    return X[idx]
 
 
 def kron_mvprod(A, b):

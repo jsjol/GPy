@@ -1,13 +1,13 @@
 # Copyright (c) 2012-2014, GPy authors (see AUTHORS.txt).
 # Licensed under the BSD 3-clause license (see LICENSE.txt)
 
-# Kurt Cutajar
+# Kurt Cutajar, Jens Sjölund
 
 import unittest
 import numpy as np
 import GPy
 from GPy.inference.latent_function_inference.gaussian_grid_inference \
-    import (_expand, _get_factorized_kernel)
+    import (_expand, _get_factorized_kernel, factor_grid)
 
 
 class GridModelTest(unittest.TestCase):
@@ -55,25 +55,13 @@ class GridModelTest(unittest.TestCase):
                                        self.m2.predict(test))
 
 
-class AutoFactorizationTest(unittest.TestCase):
+class FactorizationTest(unittest.TestCase):
     def setUp(self):
         self.kernel = (GPy.kern.RBF(input_dim=2, active_dims=[0, 1]) *
                        GPy.kern.RBF(input_dim=1, active_dims=[2]) *
                        GPy.kern.Exponential(input_dim=2, active_dims=[3, 4]))
         self.grid_dims = [[0], [1], [2, 3, 4]]
 
-#    def test_detect_factorization(self):
-#        active_dims_expanded = _detect_factorization(self.kernel)
-#        #import pdb; pdb.set_trace()
-#        #n_parts_expanded = len(kern_expanded.parts)
-#        #np.testing.assert_equal(n_parts_expanded, 5)
-#
-#        #active_dims_expanded = [kern_expanded.parts[d].active_dims
-#         #                       for d in range(n_parts_expanded)]
-#        #import pdb; pdb.set_trace()
-#        expected_active_dims_expanded = [[0], [1], [1], [2], [3, 4]]
-#        np.testing.assert_array_equal(active_dims_expanded,
-#                                      expected_active_dims_expanded)
     def test_expand(self):
         kern_expanded = _expand(self.kernel)
         active_dims_expanded = [kern_expanded.parts[d].active_dims.tolist()
@@ -85,9 +73,28 @@ class AutoFactorizationTest(unittest.TestCase):
                                       expected_active_dims_expanded)
 
     def test_get_factorized_kernel(self):
-        kern_factored = _get_factorized_kernel(self.kernel, self.grid_dims)
+        kern_factored = _get_factorized_kernel(_expand(self.kernel),
+                                               self.grid_dims)
         active_dims_factored = [kern_factored[d].active_dims.tolist()
-                                for d in range(len(kern_factored.parts))]
-        expected_active_dims_factored = [[0], [1], [2, 3, 4]]
+                                for d in range(len(kern_factored))]
+        expected_active_dims_factored = [[0], [0], [0, 1, 2]]
         np.testing.assert_array_equal(active_dims_factored,
                                       expected_active_dims_factored)
+
+
+class FactorGridTest(unittest.TestCase):
+    def setUp(self):
+        x = np.arange(2).reshape(2, 1)
+        y = np.arange(4).reshape(2, 2)
+        self.xg = [x, y]
+        self.grid_dims = [[0], [1, 2]]
+        self.X = np.array([[0, 0, 1],
+                           [0, 2, 3],
+                           [1, 0, 1],
+                           [1, 2, 3]])
+
+    def test_factor_grid(self):
+        resulting_xg = factor_grid(self.X, self.grid_dims)
+        np.testing.assert_(len(resulting_xg) == 2)
+        np.testing.assert_array_equal(resulting_xg[0], self.xg[0])
+        np.testing.assert_array_equal(resulting_xg[1], self.xg[1])

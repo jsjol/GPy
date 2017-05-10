@@ -41,10 +41,11 @@ class GpGrid(GP):
     """
 
     def __init__(self, X, Y, kernel, likelihood, inference_method=None,
-                 name='gp grid', Y_metadata=None, normalizer=False):
+                 name='gp grid', Y_metadata=None, normalizer=False,
+                 grid_dims=None):
         #pick a sensible inference method
 
-        inference_method = gaussian_grid_inference.GaussianGridInference()
+        inference_method = gaussian_grid_inference.GaussianGridInference(grid_dims)
 
         GP.__init__(self, X, Y, kernel, likelihood, inference_method=inference_method, name=name, Y_metadata=Y_metadata, normalizer=normalizer)
         self.posterior = None
