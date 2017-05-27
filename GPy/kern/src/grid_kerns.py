@@ -38,13 +38,12 @@ class GridKern(Stationary):
         r = self._scaled_dist(X, X2)
         return self.dKdLen_of_r(r, dimCheck, lengthscale)
 
-    def dK_dtheta(self, X, X2=None):
+    def dK_dParams(self, X, X2=None):
         r = self._scaled_dist(X, X2)
         dK_dVar = self.dKdVar_of_r(r)
         dK_dLen = self.dKdLen_of_r(r, dimCheck=True,
                                    lengthscale=self.lengthscale)
-        dK_dtheta = np.stack((dK_dVar, dK_dLen), -1)
-        return dK_dtheta
+        return np.stack((dK_dVar, dK_dLen), -1)
 
 
 class GridRBF(GridKern):

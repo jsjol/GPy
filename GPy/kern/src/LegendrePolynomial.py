@@ -67,7 +67,7 @@ class LegendrePolynomial(Kern):
         return V, c
 
     @Cache_this(limit=3)
-    def dK_dtheta(self, X, X2=None):
+    def dK_dParams(self, X, X2=None):
         V, _ = self._getVandermondeMatrixAndCoefficients(X, X2)
         V = V[:, :, self.orders]
         return V
@@ -76,7 +76,7 @@ class LegendrePolynomial(Kern):
         return self.K(X).diagonal()
 
     def update_gradients_full(self, dL_dK, X, X2=None):
-        dK_dCoefficients = self.dK_dtheta(X, X2)
+        dK_dCoefficients = self.dK_dParams(X, X2)
         dL_dCoefficients = dL_dK[:, :, np.newaxis] * dK_dCoefficients
         self.coefficients.gradient = np.sum(dL_dCoefficients, axis=(0, 1))
 

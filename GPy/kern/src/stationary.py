@@ -199,15 +199,15 @@ class Stationary(Kern):
             self.lengthscale.gradient = -np.sum(dL_dr*r)/self.lengthscale
 
 
-    def update_gradients_direct(self, dL_dVar, dL_dLen):
+    def update_gradients_direct(self, dL_dParams):
         """
         Specially intended for the Grid regression case.
         Given the computed log likelihood derivates, update the corresponding
         kernel and likelihood gradients.
         Useful for when gradients have been computed a priori.
         """
-        self.variance.gradient = dL_dVar
-        self.lengthscale.gradient = dL_dLen
+        self.variance.gradient = dL_dParams[0]
+        self.lengthscale.gradient = dL_dParams[1]
 
     def _inv_dist(self, X, X2=None):
         """
@@ -353,6 +353,12 @@ class Stationary(Kern):
         else:
             active_dims = self.active_dims
         active_dims = [[active_dims[d]] for d in range(D)]
+
+#        if D == 1:
+#            return self.get_one_dimensional_kernel(
+#                            D,
+#                            lengthscale=self.lengthscale.copy(),
+#                            active_dims=active_dims[0])
 
         if self.ARD:
             oneDkernels = [self.get_one_dimensional_kernel(

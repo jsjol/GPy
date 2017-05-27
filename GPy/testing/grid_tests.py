@@ -7,7 +7,8 @@ import unittest
 import numpy as np
 import GPy
 from GPy.inference.latent_function_inference.gaussian_grid_inference \
-    import (_expand, _get_factorized_kernel, factor_grid)
+    import (_get_factorized_kernel, factor_grid)
+from GPy.core.gp_grid import _expand
 
 
 class GridModelTest(unittest.TestCase):
@@ -32,8 +33,7 @@ class GridModelTest(unittest.TestCase):
                                    variance=2, ARD=True)
         self.m = GPy.models.GPRegressionGrid(self.X, self.Y, self.kernel)
 
-        self.kernel2 = GPy.kern.RBF(input_dim=self.dim, lengthscale=(2, 3, 4),
-                                    variance=2, ARD=True)
+        self.kernel2 = self.kernel.copy()
         self.m2 = GPy.models.GPRegression(self.X, self.Y, self.kernel2)
 
     def test_alpha_match(self):
@@ -41,15 +41,29 @@ class GridModelTest(unittest.TestCase):
                                        self.m2.posterior.woodbury_vector)
 
     def test_gradient_match(self):
-        np.testing.assert_almost_equal(self.kernel.lengthscale.gradient,
+
+        D = len(self.m.kern.parts)
+        lengthscale_gradient = np.zeros((D,))
+        dL_dVar_part = np.zeros((D,))
+        var_parts = np.zeros((D,))
+        for i, part in enumerate(self.m.kern.parts):
+            lengthscale_gradient[i] = part.lengthscale.gradient
+            dL_dVar_part[i] = part.variance.gradient
+            var_parts[i] = part.variance
+
+        dVar_part_dVar_product = 1./D * var_parts ** (1 - D)
+        dL_dVar = np.dot(dL_dVar_part.T, dVar_part_dVar_product)
+
+        np.testing.assert_almost_equal(lengthscale_gradient,
                                        self.kernel2.lengthscale.gradient)
         np.testing.assert_almost_equal(self.m.likelihood.variance.gradient,
                                        self.m2.likelihood.variance.gradient)
-        np.testing.assert_almost_equal(self.kernel.variance.gradient,
+        np.testing.assert_almost_equal(dL_dVar,
                                        self.kernel2.variance.gradient)
 
     def test_prediction_match(self):
-        test = np.array([[0, 0, 2], [-1, 3, -4]])
+        test = np.array([[0, 0, 2],
+                         [-1, 3, -4]])
 
         np.testing.assert_almost_equal(self.m.predict(test),
                                        self.m2.predict(test))
@@ -98,3 +112,17 @@ class FactorGridTest(unittest.TestCase):
         np.testing.assert_(len(resulting_xg) == 2)
         np.testing.assert_array_equal(resulting_xg[0], self.xg[0])
         np.testing.assert_array_equal(resulting_xg[1], self.xg[1])
+
+    def test_grid_regression_with_given_factorization(self):
+        kernel = (GPy.kern.GridRBF(input_dim=1, active_dims=[0]) *
+                  GPy.kern.GridRBF(input_dim=2, active_dims=[1, 2]))
+        Y = np.random.randn(self.X.shape[0], 1)
+        m = GPy.models.GPRegressionGrid(self.X, Y, kernel,
+                                        grid_dims=self.grid_dims)
+
+#    def test_grid_regression_with_given_factorization_of_stationary(self):
+#        kernel = (GPy.kern.RBF(input_dim=1, active_dims=[0]) *
+#                  GPy.kern.Exponential(input_dim=2, active_dims=[1, 2]))
+#        Y = np.random.randn(self.X.shape[0], 1)
+#        m = GPy.models.GPRegressionGrid(self.X, Y, kernel,
+#                                        grid_dims=self.grid_dims)

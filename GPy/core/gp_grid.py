@@ -16,12 +16,14 @@
 #  publisher={IEEE}
 #}
 
+from functools import reduce
 import numpy as np
 import scipy.linalg as sp
 from .gp import GP
 from .parameterization.param import Param
 from ..inference.latent_function_inference import gaussian_grid_inference
 from .. import likelihoods
+from ..kern import Prod, RBF
 
 import logging
 from GPy.inference.latent_function_inference.posterior import Posterior
@@ -43,8 +45,10 @@ class GpGrid(GP):
     def __init__(self, X, Y, kernel, likelihood, inference_method=None,
                  name='gp grid', Y_metadata=None, normalizer=False,
                  grid_dims=None):
-        #pick a sensible inference method
 
+        kernel = _expand(kernel.copy())
+
+        #pick a sensible inference method
         inference_method = gaussian_grid_inference.GaussianGridInference(grid_dims)
 
         GP.__init__(self, X, Y, kernel, likelihood, inference_method=inference_method, name=name, Y_metadata=Y_metadata, normalizer=normalizer)
@@ -59,9 +63,10 @@ class GpGrid(GP):
             This method is not designed to be called manually, the framework is set up to automatically call this method upon changes to parameters, if you call
             this method yourself, there may be unexpected consequences.
         """
+        #import pdb; pdb.set_trace()
         self.posterior, self._log_marginal_likelihood, self.grad_dict = self.inference_method.inference(self.kern, self.X, self.likelihood, self.Y_normalized, self.Y_metadata)
         self.likelihood.update_gradients(self.grad_dict['dL_dthetaL'])
-        self.kern.update_gradients_direct(self.grad_dict['dL_dVar'], self.grad_dict['dL_dLen'])
+        self.kern.update_gradients_direct(self.grad_dict['dL_dParams'])
 
     def kron_mmprod(self, A, B):
         count = 0
@@ -115,3 +120,17 @@ class GpGrid(GP):
         var = var.reshape(-1, 1)
 
         return mu, var
+
+
+def _expand(kern):
+    """
+    Recursively expand parts that are either RBFs or products themselves
+    """
+    if isinstance(kern, RBF):
+        return kern.as_product_kernel()
+    elif isinstance(kern, Prod):
+        children = [_expand(kern.parts[d]) for d in range(len(kern.parts))]
+        kern_expanded = reduce((lambda child_1, child_2: child_1 * child_2), children)
+        return kern_expanded
+    else:
+        return kern

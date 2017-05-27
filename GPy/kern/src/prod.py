@@ -74,6 +74,17 @@ class Prod(CombinationKernel):
                 to_update = list(set(self.parts) - set(combination))[0]
                 to_update.update_gradients_diag(dL_dKdiag * prod, X)
 
+    def update_gradients_direct(self, dL_dParams):
+        """
+        Set the gradients of all parameters directly, i.e. not using the
+        chain rule. Specially intended for the Grid regression case.
+        Given the computed log likelihood derivates, update the corresponding
+        variance and likelihood gradients.
+        """
+        D = len(self.parts)
+        for i in range(D):
+            self.parts[i].update_gradients_direct(dL_dParams[i])
+
     def gradients_X(self, dL_dK, X, X2=None):
         target = np.zeros(X.shape)
         if len(self.parts)==2:
@@ -161,6 +172,30 @@ class Prod(CombinationKernel):
             H    = np.kron(H,Ht)
             
         return (F,L,Qc,H,Pinf,P0,dF,dQc,dPinf,dP0)
+
+
+#class ProdStationary(Prod):
+#
+#    def __init__(self, kernels, name='mul'):
+#        super(ProdStationary, self).__init__(kernels, name)
+#
+#    def update_gradients_direct(self, dL_dVar, dL_dLen):
+#        """
+#        Set the gradients of all parameters directly, i.e. not using the
+#        chain rule. Specially intended for the Grid regression case.
+#        Given the computed log likelihood derivates, update the corresponding
+#        variance and likelihood gradients.
+#
+#       NOTE: assumes factors are of class Stationary
+#       NOTE2: Actually, it might be fine as long as we have a variance for each factor
+#       (might require raising variance to 1/D, with care taken to chain rule)
+#       QUESTION: what's up with parts mixing data from the other part when updating? (cf. update_gradients_diag)
+#        """
+#        D = len(self.parts)
+#        for i in range(D):
+#            self.parts[i].update_gradients_direct(
+#               dL_dVar * self.parts[i].variance ** (D - 1), dL_dLen[i])
+
 
 def dkron(A,dA,B,dB, operation='prod'):
     """

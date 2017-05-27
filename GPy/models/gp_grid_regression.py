@@ -26,11 +26,13 @@ class GPRegressionGrid(GpGrid):
 
     """
 
-    def __init__(self, X, Y, kernel=None, Y_metadata=None, normalizer=None):
+    def __init__(self, X, Y, kernel=None, Y_metadata=None, normalizer=None,
+                 grid_dims=None):
 
         if kernel is None:
             kernel = kern.RBF(1)   # no other kernels implemented so far
 
         likelihood = likelihoods.Gaussian()
-        super(GPRegressionGrid, self).__init__(X, Y, kernel, likelihood, name='GP Grid regression', Y_metadata=Y_metadata, normalizer=normalizer)
-
+        super(GPRegressionGrid, self).__init__(
+           X, Y, kernel, likelihood, name='GP Grid regression',
+           Y_metadata=Y_metadata, normalizer=normalizer, grid_dims=grid_dims)

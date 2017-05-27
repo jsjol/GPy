@@ -157,6 +157,16 @@ class Kern(Parameterized):
         """Set the gradients of all parameters when doing full (N) inference."""
         raise NotImplementedError
 
+    def dK_dParams(self, X, X2=None):
+        raise NotImplementedError
+
+#    def update_gradients_direct(self, *args):
+#        """
+#        Set the gradients of all parameters directly, i.e. not using the
+#        chain rule. Useful for grid regression.
+#        """
+#        raise NotImplementedError
+
     def update_gradients_expectations(self, dL_dpsi0, dL_dpsi1, dL_dpsi2, Z, variational_posterior):
         """
         Set the gradients of all parameters when doing inference with
@@ -297,11 +307,17 @@ class Kern(Parameterized):
         """
         assert isinstance(other, Kern), "only kernels can be multiplied to kernels..."
         from .prod import Prod
+#        from .prod import Prod, ProdStationary
+#        from .stationary import Stationary
         # kernels = []
         # if isinstance(self, Prod): kernels.extend(self.parameters)
         # else: kernels.append(self)
         # if isinstance(other, Prod): kernels.extend(other.parameters)
         # else: kernels.append(other)
+#        if (isinstance(self, Stationary) and isinstance(other, Stationary)):
+#            return ProdStationary([self, other], name)
+#        else:
+#            return Prod([self, other], name)
         return Prod([self, other], name)
 
     def _check_input_dim(self, X):

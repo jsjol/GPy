@@ -43,28 +43,22 @@ class GaussianGridInference(LatentFunctionInference):
         assert (isinstance(kern, RBF) or isinstance(kern, Prod)), \
             "Grid inference only implemented for RBF and product kernel."
 
-        kern = _expand(kern)
-
         if self.grid_dims is None:
             self.grid_dims = [[d] for d in range(X.shape[1])]
 
-        N = X.shape[0] #number of training points
+        N = X.shape[0]  # number of training points
 
-        xg = factor_grid(X, self.grid_dims) # TODO: make smarter than assuming 1D
+        xg = factor_grid(X, self.grid_dims)
         kern_factors = _get_factorized_kernel(kern, self.grid_dims)
 
         D = len(kern_factors)
         Kds = [kern_factors[d].K(xg[d]) for d in range(D)]
 
-        Qs = np.zeros(D, dtype=object) #vector for holding eigenvectors of covariance per dimension
-        QTs = np.zeros(D, dtype=object) #vector for holding transposed eigenvectors of covariance per dimension
-        V_kron = 1 # kronecker product of eigenvalues
+        Qs = np.zeros(D, dtype=object)
+        QTs = np.zeros(D, dtype=object)
+        V_kron = 1  # kronecker product of eigenvalues
 
         # This follows algorithm 16 in Saatci (2011)
-        
-        # My current aim is to only make it sufficiently smart to parse if it
-        # is a product kernel and then check whether each factor is rbf or 
-        # Legendre.           
 
         for d in range(D):  # Saatci 1-4
             [V, Q] = np.linalg.eigh(Kds[d])
@@ -87,32 +81,33 @@ class GaussianGridInference(LatentFunctionInference):
                                                 posterior.noise))) +
                                  N*np.log(2*np.pi))  # Saatci 8
 
-        gradient_dict = self.compute_gradients(posterior, kern, kern_factors,
-                                               xg, Kds)
+        gradient_dict = self.compute_gradients(posterior, kern,
+                                               kern_factors, xg, Kds)
 
         return (posterior, log_likelihood, gradient_dict)
 
     def compute_gradients(self, posterior, kern, kern_factors, xg, Kds):
         D = len(kern_factors)
 
-        dKd_dTheta = [kern_factors[d].dK_dtheta(xg[d]) for d in range(D)]      
+        dKd_dParams = [kern_factors[d].dK_dParams(xg[d]) for d in range(D)]
 
-        gradients = np.array([])
+        dL_dParams = [np.array([]) for i in range(D)] # List holding (lists of) dL_d(Param_ij)
         for i in range(D):  # Double loops over theta = theta_ij
             for j, _ in enumerate(kern_factors[i].param_array):
 
                 kappa_parts = []
                 for d in range(D):  # Loop over kernels
                     if i == d:
-                        kappa_parts.append(dKd_dTheta[i][:, :, j])
+                        kappa_parts.append(dKd_dParams[i][:, :, j])
                     else:
                         kappa_parts.append(Kds[d])
                 kappa = kron_mvprod(kappa_parts, posterior.alpha)
 
                 gamma = compute_gamma(posterior, kappa_parts)
 
-                gradient_ij = dL_dTheta(posterior, kappa, gamma)
-                gradients = np.append(gradients, gradient_ij)
+                dL_dParams[i] = np.append(
+                    dL_dParams[i],
+                    compute_dL_dParams(posterior, kappa, gamma))
 
         # Noise variance gradient ---------------
         kappa_parts = [np.identity(xg[d].shape[0]) for d in range(D)]
@@ -120,38 +115,11 @@ class GaussianGridInference(LatentFunctionInference):
 
         gamma = compute_gamma(posterior, kappa_parts)
 
-        dL_dNoise_variance = dL_dTheta(posterior, kappa, gamma)
+        dL_dNoise_variance = compute_dL_dParams(posterior, kappa, gamma)
         # -----------------------------------------
 
-        is_lengthscale = ['lengthscale' in param_name
-                          for param_name in kern.parameter_names()]
-        is_variance = ['variance' in param_name
-                       for param_name in kern.parameter_names()]
-
-        dL_dLen = gradients[np.nonzero(is_lengthscale)]
-
-        dL_dVar_part = gradients[np.nonzero(is_variance)]
-        var_parts = kern.param_array[np.nonzero(is_variance)]
-        dVar_part_dVar_product = 1./D * var_parts ** (1 - D)
-        dL_dVar = np.dot(dL_dVar_part, dVar_part_dVar_product)
-
-        return {'dL_dLen': dL_dLen,
-                'dL_dVar': dL_dVar,
+        return {'dL_dParams': dL_dParams,
                 'dL_dthetaL': dL_dNoise_variance}
-
-
-def _expand(kern):
-    """
-    Recursively expand parts that are either RBFs or products themselves
-    """
-    if isinstance(kern, RBF):
-        return kern.as_product_kernel()
-    elif isinstance(kern, Prod):
-        children = [_expand(kern.parts[d]) for d in range(len(kern.parts))]
-        kern_expanded = reduce((lambda child_1, child_2: child_1 * child_2), children)
-        return kern_expanded
-    else:
-        return kern
 
 
 def _get_factorized_kernel(kern, grid_dims):
@@ -180,15 +148,34 @@ def list_in_list(element, list_to_search):
 
 
 def _append(kern_factored, kern_to_append):
-    kern_to_append = _set_active_dims_to_none(kern_to_append)
+#    kern_to_append = _set_active_dims_to_none(kern_to_append)
+    kern_to_append = _update_sliced_active_dims(kern_to_append)
     return kern_factored.append(kern_to_append)
 
 
 def _set_active_dims_to_none(k):
     # For correct behavior when passing pre-sliced Xs
-    # TODO: handle the details elsewhere (part of Kern.__init__)
+    # TODO: handle these details elsewhere (part of Kern.__init__)
     k.active_dims = np.arange(k.input_dim, dtype=int)
     k._all_dims_active = k.active_dims
+    return k
+
+
+def _update_sliced_active_dims(k, shift=None):
+
+    if k.active_dims is None:
+        k.active_dims = np.arange(k.input_dim, dtype=int)
+    else:
+        if shift is None:
+            shift = k.active_dims[0]
+        k.active_dims = np.atleast_1d(k.active_dims) - shift
+
+    k._all_dims_active = k.active_dims
+
+    if isinstance(k, Prod):
+        for i, kern in enumerate(k.parts):
+            k.parts[i] = _set_active_dims_to_none(kern)
+
     return k
 
 
@@ -266,6 +253,6 @@ def _compute_gamma_d(P_T, A, P):
     return np.diag(np.dot(np.dot(P_T, A.T), P))
 
 
-def dL_dTheta(posterior, kappa, gamma):
+def compute_dL_dParams(posterior, kappa, gamma):
     return (0.5*np.dot(posterior.alpha.T, kappa) -
             0.5*np.sum(gamma / (posterior.V_kron + posterior.noise)))
