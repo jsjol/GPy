@@ -91,35 +91,54 @@ class GaussianGridInference(LatentFunctionInference):
 
         dKd_dParams = [kern_factors[d].dK_dParams(xg[d]) for d in range(D)]
 
-        dL_dParams = [np.array([]) for i in range(D)] # List holding (lists of) dL_d(Param_ij)
-        for i in range(D):  # Double loops over theta = theta_ij
-            for j, _ in enumerate(kern_factors[i].param_array):
-
-                kappa_parts = []
+        dL_dParams = []
+        for i, factor in enumerate(kern_factors):  # Double loops over theta = theta_ij
+            dL_dFactorParams = np.array([])
+            for j, _ in enumerate(factor.param_array):
+                kappa_factors = []
                 for d in range(D):  # Loop over kernels
                     if i == d:
-                        kappa_parts.append(dKd_dParams[i][:, :, j])
+                        kappa_factors.append(dKd_dParams[i][:, :, j])
                     else:
-                        kappa_parts.append(Kds[d])
-                kappa = kron_mvprod(kappa_parts, posterior.alpha)
+                        kappa_factors.append(Kds[d])
 
-                gamma = compute_gamma(posterior, kappa_parts)
+                dL_dFactorParams = np.append(
+                    dL_dFactorParams,
+                    _dL_dParam_from_parts(kappa_factors, posterior))
 
-                dL_dParams[i] = np.append(
-                    dL_dParams[i],
-                    compute_dL_dParams(posterior, kappa, gamma))
+            dL_dPartParams = _expand_prod_gradient(factor, dL_dFactorParams)
+            # The gradient update requires the gradients of each part
+            # in a product kernel separately
+            for g in dL_dPartParams:
+                dL_dParams.append(g)
 
-        # Noise variance gradient ---------------
-        kappa_parts = [np.identity(xg[d].shape[0]) for d in range(D)]
-        kappa = kron_mvprod(kappa_parts, posterior.alpha)
-
-        gamma = compute_gamma(posterior, kappa_parts)
-
-        dL_dNoise_variance = compute_dL_dParams(posterior, kappa, gamma)
+        # Noise variance gradient -----------------
+        kappa_factors = [np.identity(xg[d].shape[0]) for d in range(D)]
+        dL_dNoise_variance = _dL_dParam_from_parts(kappa_factors, posterior)
         # -----------------------------------------
 
         return {'dL_dParams': dL_dParams,
                 'dL_dthetaL': dL_dNoise_variance}
+
+
+def _dL_dParam_from_parts(kappa_factors, posterior):
+    kappa = kron_mvprod(kappa_factors, posterior.alpha)
+    gamma = compute_gamma(posterior, kappa_factors)
+    return compute_dL_dParams(posterior, kappa, gamma)
+
+
+def _expand_prod_gradient(kern, flattened_dL_dParams):
+    if isinstance(kern, Prod):
+        idx = 0
+        out = []
+        for part in kern.parts:
+            n = len(part.param_array)
+            out.append(flattened_dL_dParams[idx:idx + n])
+            idx += n
+    else:
+        out = [flattened_dL_dParams]
+
+    return out
 
 
 def _get_factorized_kernel(kern, grid_dims):
@@ -236,10 +255,10 @@ def kron_mvprod(A, b):
     return x
 
 
-def compute_gamma(posterior, kappa_parts):
-    D = len(kappa_parts)
+def compute_gamma(posterior, kappa_factors):
+    D = len(kappa_factors)
     gamma_d = [_compute_gamma_d(posterior.QTs[d],
-                                kappa_parts[d],
+                                kappa_factors[d],
                                 posterior.Qs[d])
                for d in range(D)]
     gamma = reduce(np.kron, gamma_d)

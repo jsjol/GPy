@@ -119,10 +119,13 @@ class FactorGridTest(unittest.TestCase):
         Y = np.random.randn(self.X.shape[0], 1)
         m = GPy.models.GPRegressionGrid(self.X, Y, kernel,
                                         grid_dims=self.grid_dims)
+#        m2 = GPy.models.GPRegression(self.X, Y, kernel)
+        # TODO: add an actual test (compare with ordinary GPRegression?)
 
-#    def test_grid_regression_with_given_factorization_of_stationary(self):
-#        kernel = (GPy.kern.RBF(input_dim=1, active_dims=[0]) *
-#                  GPy.kern.Exponential(input_dim=2, active_dims=[1, 2]))
-#        Y = np.random.randn(self.X.shape[0], 1)
-#        m = GPy.models.GPRegressionGrid(self.X, Y, kernel,
-#                                        grid_dims=self.grid_dims)
+    def test_grid_regression_with_given_factorization_of_stationary(self):
+        kernel = (GPy.kern.RBF(input_dim=1, active_dims=[0]) *
+                  GPy.kern.Exponential(input_dim=2, active_dims=[1, 2]))
+        Y = np.random.randn(self.X.shape[0], 1)
+        m = GPy.models.GPRegressionGrid(self.X, Y, kernel,
+                                        grid_dims=self.grid_dims)
+        # TODO: add an actual test (compare with ordinary GPRegression?)

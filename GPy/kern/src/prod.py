@@ -81,9 +81,33 @@ class Prod(CombinationKernel):
         Given the computed log likelihood derivates, update the corresponding
         variance and likelihood gradients.
         """
-        D = len(self.parts)
-        for i in range(D):
-            self.parts[i].update_gradients_direct(dL_dParams[i])
+#        D = len(self.parts)
+#        for i in range(D):
+#            self.parts[i].update_gradients_direct(dL_dParams[i])
+#        import pdb; pdb.set_trace()
+        for i, part in enumerate(self.parts):
+            part.update_gradients_direct(dL_dParams[i])
+
+    def dK_dParams(self, X, X2=None):
+        """
+        Compute the derivatives of K with respect to all hyperparameters.
+        Assumes that the hyperparameters belong to one and only one kernel.
+        Specially intended for the Grid regression case.
+        """
+        Ks = [part.K(X, X2) for part in self.parts]
+        out = []
+        for i, part in enumerate(self.parts):
+            part_dK_dParams = part.dK_dParams(X, X2)  # N x M x P_i
+            for j in range(len(part.param_array)):
+                dK_dParam_ij = np.ones_like(Ks[0])  # N x M
+                for d in range(len(self.parts)):
+                    if d == i:
+                        dK_dParam_ij *= part_dK_dParams[:, :, j]
+                    else:
+                        dK_dParam_ij *= Ks[d]
+                out.append(dK_dParam_ij)
+
+        return np.stack(out, -1)
 
     def gradients_X(self, dL_dK, X, X2=None):
         target = np.zeros(X.shape)

@@ -160,13 +160,6 @@ class Kern(Parameterized):
     def dK_dParams(self, X, X2=None):
         raise NotImplementedError
 
-#    def update_gradients_direct(self, *args):
-#        """
-#        Set the gradients of all parameters directly, i.e. not using the
-#        chain rule. Useful for grid regression.
-#        """
-#        raise NotImplementedError
-
     def update_gradients_expectations(self, dL_dpsi0, dL_dpsi1, dL_dpsi2, Z, variational_posterior):
         """
         Set the gradients of all parameters when doing inference with

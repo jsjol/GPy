@@ -86,6 +86,35 @@ class Stationary(Kern):
     def dK_dr(self, r):
         raise NotImplementedError("implement derivative of the covariance function wrt r to use this class")
 
+    def dK_dParams(self, X, X2=None):
+        # TODO: assert that variance and lengthscale are the only parameters
+        out = []
+        r = self._scaled_dist(X, X2)
+        dK_dVar = self.K_of_r(r) / self.variance
+        out.append(dK_dVar)
+        if self.ARD:
+            # TODO: put the below in a separate function (copied from _unscaled_dist())
+            if X2 is None:
+                Xsq = np.sum(np.square(X),1)
+                r2 = -2.*tdot(X) + (Xsq[:,None] + Xsq[None,:])
+                util.diag.view(r2)[:,]= 0. # force diagnoal to be zero: sometime numerically a little negative
+                r2 = np.clip(r2, 0, np.inf)
+            else:
+                X1sq = np.sum(np.square(X),1)
+                X2sq = np.sum(np.square(X2),1)
+                r2 = -2.*np.dot(X, X2.T) + (X1sq[:,None] + X2sq[None,:])
+                r2 = np.clip(r2, 0, np.inf)
+
+            dr_dLen = [-(1/r) * (r2[:, q] / self.lengthscale[q] ** 3)
+                       for q in range(self.input_dim)]
+            dK_dLen = [self.dK_dr(r) * dr_dLen_q for dr_dLen_q in dr_dLen]
+            out.append(dK_dLen)
+        else:
+            dr_dLen = -r / self.lengthscale
+            dK_dLen = self.dK_dr(r) * dr_dLen
+            out.append(dK_dLen)
+        return np.stack(out, -1)
+
     @Cache_this(limit=3, ignore_args=())
     def dK2_drdr(self, r):
         raise NotImplementedError("implement second derivative of covariance wrt r to use this method")
