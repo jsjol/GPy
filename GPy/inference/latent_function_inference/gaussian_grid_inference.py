@@ -22,6 +22,7 @@ import numpy as np
 from .grid_posterior import GridPosterior
 from ...kern import Prod, RBF
 from . import LatentFunctionInference
+import pdb
 
 
 class GaussianGridInference(LatentFunctionInference):
@@ -30,6 +31,8 @@ class GaussianGridInference(LatentFunctionInference):
 
     The function self.inference returns a GridPosterior object, which summarizes
     the posterior.
+
+    This follows algorithm 16 in Saatci (2011)
 
     """
     def __init__(self, grid_dims):
@@ -40,8 +43,10 @@ class GaussianGridInference(LatentFunctionInference):
         """
         Returns a GridPosterior class containing essential quantities of the posterior
         """
-        assert (isinstance(kern, RBF) or isinstance(kern, Prod)), \
-            "Grid inference only implemented for RBF and product kernel."
+#        assert (isinstance(kern, RBF) or isinstance(kern, Prod)), \
+#            "Grid inference only implemented for RBF and product kernel."
+        # TODO: update checks above. The case when len(grid_dims) == 1 does not 
+        # not benefit from Grid inference, but could be useful for testing
 
         if self.grid_dims is None:
             self.grid_dims = [[d] for d in range(X.shape[1])]
@@ -54,21 +59,16 @@ class GaussianGridInference(LatentFunctionInference):
         D = len(kern_factors)
         Kds = [kern_factors[d].K(xg[d]) for d in range(D)]
 
-        Qs = np.zeros(D, dtype=object)
-        QTs = np.zeros(D, dtype=object)
+        Qs = []
         V_kron = 1  # kronecker product of eigenvalues
-
-        # This follows algorithm 16 in Saatci (2011)
-
         for d in range(D):  # Saatci 1-4
             [V, Q] = np.linalg.eigh(Kds[d])
             V_kron = np.kron(V_kron, V)
-            Qs[d] = Q
-            QTs[d] = Q.T
+            Qs.append(Q)
 
         noise = likelihood.variance + 1e-8
 
-        alpha_kron = kron_mvprod(QTs, Y)  # Saatci 5 # TODO: Remove the need for stored QTs
+        alpha_kron = kron_mvprod([Q.T for Q in Qs], Y)  # Saatci 5 #
         V_kron = V_kron.reshape(-1, 1)
         alpha_kron = alpha_kron / (V_kron + noise)  # Saatci 6
         alpha_kron = kron_mvprod(Qs, alpha_kron)  # Saatci 7
@@ -112,6 +112,9 @@ class GaussianGridInference(LatentFunctionInference):
             for g in dL_dPartParams:
                 dL_dParams.append(g)
 
+        if len(dL_dParams) == 1:
+            dL_dParams = dL_dParams[0]
+
         # Noise variance gradient -----------------
         kappa_factors = [np.identity(xg[d].shape[0]) for d in range(D)]
         dL_dNoise_variance = _dL_dParam_from_parts(kappa_factors, posterior)
@@ -119,12 +122,6 @@ class GaussianGridInference(LatentFunctionInference):
 
         return {'dL_dParams': dL_dParams,
                 'dL_dthetaL': dL_dNoise_variance}
-
-
-def _dL_dParam_from_parts(kappa_factors, posterior):
-    kappa = kron_mvprod(kappa_factors, posterior.alpha)
-    gamma = compute_gamma(posterior, kappa_factors)
-    return compute_dL_dParams(posterior, kappa, gamma)
 
 
 def _expand_prod_gradient(kern, flattened_dL_dParams):
@@ -142,6 +139,9 @@ def _expand_prod_gradient(kern, flattened_dL_dParams):
 
 
 def _get_factorized_kernel(kern, grid_dims):
+    if len(grid_dims) == 1:
+        return [kern]
+
     kern_factored = []
     leftovers = []
     for i in range(len(kern.parts)):
@@ -172,14 +172,6 @@ def _append(kern_factored, kern_to_append):
     return kern_factored.append(kern_to_append)
 
 
-def _set_active_dims_to_none(k):
-    # For correct behavior when passing pre-sliced Xs
-    # TODO: handle these details elsewhere (part of Kern.__init__)
-    k.active_dims = np.arange(k.input_dim, dtype=int)
-    k._all_dims_active = k.active_dims
-    return k
-
-
 def _update_sliced_active_dims(k, shift=None):
 
     if k.active_dims is None:
@@ -198,18 +190,12 @@ def _update_sliced_active_dims(k, shift=None):
     return k
 
 
-#def _detect_factorization(kern):
-#    """
-#    Recursively detect a valid factorization
-#    """
-#    if isinstance(kern, RBF):
-#        return [[kern.active_dims[d]] for d in range(kern.input_dim)]
-#    elif isinstance(kern, Prod):
-#        L = len(kern.parts)
-#        children = [_detect_factorization(kern.parts[d]) for d in range(L)]
-#        return list(chain.from_iterable(children))
-#    else:
-#        return [list(kern.active_dims)]
+def _set_active_dims_to_none(k):
+    # For correct behavior when passing pre-sliced Xs
+    # TODO: handle these details elsewhere (part of Kern.__init__)
+    k.active_dims = np.arange(k.input_dim, dtype=int)
+    k._all_dims_active = k.active_dims
+    return k
 
 
 def factor_grid(X, grid_dims):
@@ -232,7 +218,7 @@ def unique_rows(X):
     """
     X_view = np.ascontiguousarray(X).view(np.dtype((np.void, X.dtype.itemsize * X.shape[1])))
     _, idx = np.unique(X_view, return_index=True)
-    return X[idx]
+    return X[sorted(idx)]  # Sorting necessary to preserve ordering
 
 
 def kron_mvprod(A, b):
@@ -255,23 +241,26 @@ def kron_mvprod(A, b):
     return x
 
 
+def _dL_dParam_from_parts(kappa_factors, posterior):
+    kappa = kron_mvprod(kappa_factors, posterior.alpha)
+    gamma = compute_gamma(posterior, kappa_factors)
+    return compute_dL_dParams(posterior, kappa, gamma)
+
+
 def compute_gamma(posterior, kappa_factors):
     D = len(kappa_factors)
-    gamma_d = [_compute_gamma_d(posterior.QTs[d],
-                                kappa_factors[d],
+    gamma_d = [_compute_gamma_d(kappa_factors[d],
                                 posterior.Qs[d])
                for d in range(D)]
     gamma = reduce(np.kron, gamma_d)
     return gamma.reshape(-1, 1)
 
 
-def _compute_gamma_d(P_T, A, P):
+def _compute_gamma_d(A, Q):
     # This could be made more efficiently using np.einsum()
-    # Note: K transposed (typo in Saatci eq. (5.36), but this
-    # doesn't matter since it's symmetric)
-    return np.diag(np.dot(np.dot(P_T, A.T), P))
+    return np.diag(np.dot(np.dot(A, Q).T, Q))
 
 
 def compute_dL_dParams(posterior, kappa, gamma):
     return (0.5*np.dot(posterior.alpha.T, kappa) -
-            0.5*np.sum(gamma / (posterior.V_kron + posterior.noise)))
+            0.5*np.dot(gamma.T,  1/(posterior.V_kron + posterior.noise)))

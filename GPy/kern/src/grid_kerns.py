@@ -8,6 +8,8 @@ from .stationary import Stationary
 from paramz.caching import Cache_this
 
 
+# NOTE: THIS FILE IS OBSOLETE
+
 class GridKern(Stationary):
 
     def __init__(self, input_dim, variance, lengthscale, ARD, active_dims, name, originalDimensions, useGPU=False):

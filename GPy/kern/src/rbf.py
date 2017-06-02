@@ -67,9 +67,9 @@ class RBF(Stationary):
         """
         Specially intended for Grid regression.
         """
-        oneDkernel = GridRBF(input_dim=1,
-                             variance=self.variance ** (1./dim),
-                             originalDimensions=dim, **kwargs)
+        oneDkernel = RBF(input_dim=1,
+                         variance=self.variance ** (1./dim),
+                         **kwargs)
         return oneDkernel
 
     #---------------------------------------#

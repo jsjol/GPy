@@ -1,7 +1,6 @@
 # Copyright (c) 2012-2014, GPy authors (see AUTHORS.txt).
 # Licensed under the BSD 3-clause license (see LICENSE.txt)
 
-# Kurt Cutajar
 
 import numpy as np
 
@@ -14,19 +13,12 @@ class GridPosterior(object):
     schemes and the model classes.
 
     """
-    def __init__(self, alpha_kron=None, Qs=None, V_kron=None, noise=None):
+    def __init__(self, alpha_kron, Qs, V_kron, noise=None):
         """
         alpha_kron : 
-        QTs : transpose of eigen vectors resulting from decomposition of single dimension covariance matrices
         Qs : eigen vectors resulting from decomposition of single dimension covariance matrices
         V_kron : kronecker product of eigenvalues reulting decomposition of single dimension covariance matrices
         """
-
-        if ((alpha_kron is not None) and (Qs is not None)
-            and (V_kron is not None)):
-            pass # we have sufficient to compute the posterior
-        else:
-            raise ValueError("insufficient information for predictions")
 
         self._alpha_kron = alpha_kron
         self._qs = Qs
@@ -38,13 +30,6 @@ class GridPosterior(object):
         """
         """
         return self._alpha_kron
-
-    @property
-    def QTs(self):
-        """
-        array of transposed eigenvectors resulting for single dimension covariance
-        """
-        return self._qs.T
 
     @property
     def Qs(self):

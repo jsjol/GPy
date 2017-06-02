@@ -63,32 +63,9 @@ class GpGrid(GP):
             This method is not designed to be called manually, the framework is set up to automatically call this method upon changes to parameters, if you call
             this method yourself, there may be unexpected consequences.
         """
-        #import pdb; pdb.set_trace()
         self.posterior, self._log_marginal_likelihood, self.grad_dict = self.inference_method.inference(self.kern, self.X, self.likelihood, self.Y_normalized, self.Y_metadata)
         self.likelihood.update_gradients(self.grad_dict['dL_dthetaL'])
         self.kern.update_gradients_direct(self.grad_dict['dL_dParams'])
-
-    def kron_mmprod(self, A, B):
-        count = 0
-        D = len(A)
-        for b in (B.T):
-            x = b
-            N = 1
-            G = np.zeros(D)
-            for d in range(D):
-                G[d] = len(A[d])
-            N = np.prod(G)
-            for d in range(D-1, -1, -1):
-                X = np.reshape(x, (G[d], np.round(N/G[d])), order='F')
-                Z = np.dot(A[d], X)
-                Z = Z.T
-                x = np.reshape(Z, (-1, 1), order='F')
-            if (count == 0):
-                result = x
-            else:
-                result = np.column_stack((result, x))
-            count+=1
-        return result
 
     def _raw_predict(self, Xnew, full_cov=False, kern=None):
         """
@@ -97,29 +74,51 @@ class GpGrid(GP):
         if kern is None:
             kern = self.kern
 
+        # n = X.shape[0] (number of training samples)
+        # m = Xnew.shape[0] (number of test samples)
+
         # compute mean predictions
-        Kmn = kern.K(Xnew, self.X)
-        alpha_kron = self.posterior.alpha
-        mu = np.dot(Kmn, alpha_kron)
-        mu = mu.reshape(-1,1)
+        Knm = kern.K(self.X, Xnew)
+        mu = np.dot(Knm.T, self.posterior.alpha)
+        mu = mu.reshape(-1, 1)
 
         # compute variance of predictions
-        Knm = Kmn.T        
         noise = self.likelihood.variance
         V_kron = self.posterior.V_kron
         Qs = self.posterior.Qs
-        QTs = self.posterior.QTs
-        A = self.kron_mmprod(QTs, Knm)
-        V_kron = V_kron.reshape(-1, 1)
+        A = kron_mmprod([Q.T for Q in Qs], Knm)
+        V_kron = V_kron.reshape(-1, 1)      
         A = A / (V_kron + noise)
-        A = self.kron_mmprod(Qs, A)
+        A = kron_mmprod(Qs, A)
 
         Kmm = kern.K(Xnew)
-        var = np.diag(Kmm - np.dot(Kmn, A)).copy()
-        #var = np.zeros((Xnew.shape[0]))
+        var = np.diag(Kmm - np.dot(Knm.T, A)).copy()
         var = var.reshape(-1, 1)
 
         return mu, var
+
+
+def kron_mmprod(A, B):
+    count = 0
+    D = len(A)
+    for b in (B.T):
+        x = b
+        N = 1
+        G = np.zeros(D)
+        for d in range(D):
+            G[d] = len(A[d])
+        N = np.prod(G)
+        for d in range(D-1, -1, -1):
+            X = np.reshape(x, (G[d], np.round(N/G[d])), order='F')
+            Z = np.dot(A[d], X)
+            Z = Z.T
+            x = np.reshape(Z, (-1, 1), order='F')
+        if (count == 0):
+            result = x
+        else:
+            result = np.column_stack((result, x))
+        count+=1
+    return result
 
 
 def _expand(kern):

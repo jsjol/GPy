@@ -89,29 +89,29 @@ class Stationary(Kern):
     def dK_dParams(self, X, X2=None):
         # TODO: assert that variance and lengthscale are the only parameters
         out = []
-        r = self._scaled_dist(X, X2)
-        dK_dVar = self.K_of_r(r) / self.variance
+        dK_dVar = self.K(X, X2) / self.variance
         out.append(dK_dVar)
-        if self.ARD:
-            # TODO: put the below in a separate function (copied from _unscaled_dist())
-            if X2 is None:
-                Xsq = np.sum(np.square(X),1)
-                r2 = -2.*tdot(X) + (Xsq[:,None] + Xsq[None,:])
-                util.diag.view(r2)[:,]= 0. # force diagnoal to be zero: sometime numerically a little negative
-                r2 = np.clip(r2, 0, np.inf)
-            else:
-                X1sq = np.sum(np.square(X),1)
-                X2sq = np.sum(np.square(X2),1)
-                r2 = -2.*np.dot(X, X2.T) + (X1sq[:,None] + X2sq[None,:])
-                r2 = np.clip(r2, 0, np.inf)
 
-            dr_dLen = [-(1/r) * (r2[:, q] / self.lengthscale[q] ** 3)
-                       for q in range(self.input_dim)]
-            dK_dLen = [self.dK_dr(r) * dr_dLen_q for dr_dLen_q in dr_dLen]
-            out.append(dK_dLen)
+        if self.ARD:
+            if X2 is None:
+                dr_dLen = [-self._inv_dist(X, X2) *
+                           (self._unscaled_dist_squared(X[:, q, None],
+                                                        X2=None) /
+                           self.lengthscale[q] ** 3)
+                           for q in range(self.input_dim)]
+            else:
+                dr_dLen = [-self._inv_dist(X, X2) *
+                           (self._unscaled_dist_squared(X[:, q, None],
+                                                        X2=X2[:, q, None]) /
+                           self.lengthscale[q] ** 3)
+                           for q in range(self.input_dim)]
+
+            for dr_dLen_q in dr_dLen:
+#                np.fill_diagonal(dr_dLen_q, 0)  # Handles the 0/0 cases
+                out.append(self.dK_dr_via_X(X, X2) * dr_dLen_q)
         else:
-            dr_dLen = -r / self.lengthscale
-            dK_dLen = self.dK_dr(r) * dr_dLen
+            dr_dLen = -self._scaled_dist(X, X2) / self.lengthscale
+            dK_dLen = self.dK_dr_via_X(X, X2) * dr_dLen
             out.append(dK_dLen)
         return np.stack(out, -1)
 
@@ -149,25 +149,29 @@ class Stationary(Kern):
         #a convenience function, so we can cache dK_dr
         return self.dK2_drdr(self._scaled_dist(X, X2))
 
+    def _unscaled_dist_squared(self, X, X2=None):
+        """
+        Compute the square of the Euclidean distance between
+        each row of X and X2, or between each pair of rows of X if X2 is None.
+        """
+        if X2 is None:
+#            import pdb; pdb.set_trace()
+            Xsq = np.sum(np.square(X),1)
+            r2 = -2.*tdot(X) + (Xsq[:,None] + Xsq[None,:])
+            util.diag.view(r2)[:,]= 0. # force diagonal to be zero: sometimes numerically a little negative
+        else:
+            X1sq = np.sum(np.square(X),1)
+            X2sq = np.sum(np.square(X2),1)
+            r2 = -2.*np.dot(X, X2.T) + (X1sq[:,None] + X2sq[None,:])
+
+        return np.clip(r2, 0, np.inf)
+
     def _unscaled_dist(self, X, X2=None):
         """
         Compute the Euclidean distance between each row of X and X2, or between
         each pair of rows of X if X2 is None.
         """
-        #X, = self._slice_X(X)
-        if X2 is None:
-            Xsq = np.sum(np.square(X),1)
-            r2 = -2.*tdot(X) + (Xsq[:,None] + Xsq[None,:])
-            util.diag.view(r2)[:,]= 0. # force diagnoal to be zero: sometime numerically a little negative
-            r2 = np.clip(r2, 0, np.inf)
-            return np.sqrt(r2)
-        else:
-            #X2, = self._slice_X(X2)
-            X1sq = np.sum(np.square(X),1)
-            X2sq = np.sum(np.square(X2),1)
-            r2 = -2.*np.dot(X, X2.T) + (X1sq[:,None] + X2sq[None,:])
-            r2 = np.clip(r2, 0, np.inf)
-            return np.sqrt(r2)
+        return np.sqrt(self._unscaled_dist_squared(X, X2))
 
     @Cache_this(limit=3, ignore_args=())
     def _scaled_dist(self, X, X2=None):
@@ -382,12 +386,6 @@ class Stationary(Kern):
         else:
             active_dims = self.active_dims
         active_dims = [[active_dims[d]] for d in range(D)]
-
-#        if D == 1:
-#            return self.get_one_dimensional_kernel(
-#                            D,
-#                            lengthscale=self.lengthscale.copy(),
-#                            active_dims=active_dims[0])
 
         if self.ARD:
             oneDkernels = [self.get_one_dimensional_kernel(

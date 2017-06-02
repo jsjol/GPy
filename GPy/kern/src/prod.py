@@ -78,13 +78,7 @@ class Prod(CombinationKernel):
         """
         Set the gradients of all parameters directly, i.e. not using the
         chain rule. Specially intended for the Grid regression case.
-        Given the computed log likelihood derivates, update the corresponding
-        variance and likelihood gradients.
         """
-#        D = len(self.parts)
-#        for i in range(D):
-#            self.parts[i].update_gradients_direct(dL_dParams[i])
-#        import pdb; pdb.set_trace()
         for i, part in enumerate(self.parts):
             part.update_gradients_direct(dL_dParams[i])
 
@@ -95,16 +89,18 @@ class Prod(CombinationKernel):
         Specially intended for the Grid regression case.
         """
         Ks = [part.K(X, X2) for part in self.parts]
-        out = []
+        out = []    
         for i, part in enumerate(self.parts):
             part_dK_dParams = part.dK_dParams(X, X2)  # N x M x P_i
+#            import pdb; pdb.set_trace()
             for j in range(len(part.param_array)):
-                dK_dParam_ij = np.ones_like(Ks[0])  # N x M
-                for d in range(len(self.parts)):
-                    if d == i:
-                        dK_dParam_ij *= part_dK_dParams[:, :, j]
-                    else:
-                        dK_dParam_ij *= Ks[d]
+#                dK_dParam_ij = np.ones_like(Ks[0])  # N x M
+#                for d in range(len(self.parts)):
+#                    if d == i:
+#                        dK_dParam_ij *= part_dK_dParams[:, :, j]
+#                    else:
+#                        dK_dParam_ij *= Ks[d]
+                dK_dParam_ij = part_dK_dParams[:, :, j]
                 out.append(dK_dParam_ij)
 
         return np.stack(out, -1)
@@ -196,29 +192,6 @@ class Prod(CombinationKernel):
             H    = np.kron(H,Ht)
             
         return (F,L,Qc,H,Pinf,P0,dF,dQc,dPinf,dP0)
-
-
-#class ProdStationary(Prod):
-#
-#    def __init__(self, kernels, name='mul'):
-#        super(ProdStationary, self).__init__(kernels, name)
-#
-#    def update_gradients_direct(self, dL_dVar, dL_dLen):
-#        """
-#        Set the gradients of all parameters directly, i.e. not using the
-#        chain rule. Specially intended for the Grid regression case.
-#        Given the computed log likelihood derivates, update the corresponding
-#        variance and likelihood gradients.
-#
-#       NOTE: assumes factors are of class Stationary
-#       NOTE2: Actually, it might be fine as long as we have a variance for each factor
-#       (might require raising variance to 1/D, with care taken to chain rule)
-#       QUESTION: what's up with parts mixing data from the other part when updating? (cf. update_gradients_diag)
-#        """
-#        D = len(self.parts)
-#        for i in range(D):
-#            self.parts[i].update_gradients_direct(
-#               dL_dVar * self.parts[i].variance ** (D - 1), dL_dLen[i])
 
 
 def dkron(A,dA,B,dB, operation='prod'):
