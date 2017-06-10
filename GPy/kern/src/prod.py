@@ -56,7 +56,7 @@ class Prod(CombinationKernel):
 
     def update_gradients_full(self, dL_dK, X, X2=None):
         if len(self.parts)==2:
-            self.parts[0].update_gradients_full(dL_dK*self.parts[1].K(X,X2), X, X2)
+            self.parts[0].update_gradients_full(dL_dK*self.parts[1].K(X,X2), X, X2) # Chain rule: L = L(K_prod) = L(K_1 * K_2)
             self.parts[1].update_gradients_full(dL_dK*self.parts[0].K(X,X2), X, X2)
         else:
             for combination in itertools.combinations(self.parts, len(self.parts) - 1):
@@ -88,19 +88,28 @@ class Prod(CombinationKernel):
         Assumes that the hyperparameters belong to one and only one kernel.
         Specially intended for the Grid regression case.
         """
+#        if X2 is None:
+#            X2 = X
+
         Ks = [part.K(X, X2) for part in self.parts]
-        out = []    
+        out = []
         for i, part in enumerate(self.parts):
-            part_dK_dParams = part.dK_dParams(X, X2)  # N x M x P_i
-#            import pdb; pdb.set_trace()
+#            if part.active_dims is None:
+#                X_part = X
+#            else:
+#                # Reshape needed to preserve dimensionality if
+#                # part.active_dims is one-dimensional
+#                X_part = X[:, part.active_dims].reshape(X.shape[0], -1)
+
+            part_dK_dParams = part.dK_dParams(X, X2)      
             for j in range(len(part.param_array)):
-#                dK_dParam_ij = np.ones_like(Ks[0])  # N x M
-#                for d in range(len(self.parts)):
-#                    if d == i:
-#                        dK_dParam_ij *= part_dK_dParams[:, :, j]
-#                    else:
-#                        dK_dParam_ij *= Ks[d]
-                dK_dParam_ij = part_dK_dParams[:, :, j]
+                dK_dParam_ij = np.ones_like(Ks[0])  # N x M
+                for d in range(len(self.parts)):
+                    if d == i:
+                        dK_dParam_ij *= part_dK_dParams[:, :, j]
+                    else:
+                        dK_dParam_ij *= Ks[d]
+#                dK_dParam_ij = part_dK_dParams[:, :, j]
                 out.append(dK_dParam_ij)
 
         return np.stack(out, -1)

@@ -91,8 +91,13 @@ class Stationary(Kern):
         out = []
         dK_dVar = self.K(X, X2) / self.variance
         out.append(dK_dVar)
-
         if self.ARD:
+#            if X2 is None:
+#                X2 = X
+#
+#            dr_dLen = self._lengthscale_grads_pure(
+#                    self._inv_dist(X, X2), X, X2)
+
             if X2 is None:
                 dr_dLen = [-self._inv_dist(X, X2) *
                            (self._unscaled_dist_squared(X[:, q, None],
@@ -107,7 +112,6 @@ class Stationary(Kern):
                            for q in range(self.input_dim)]
 
             for dr_dLen_q in dr_dLen:
-#                np.fill_diagonal(dr_dLen_q, 0)  # Handles the 0/0 cases
                 out.append(self.dK_dr_via_X(X, X2) * dr_dLen_q)
         else:
             dr_dLen = -self._scaled_dist(X, X2) / self.lengthscale
@@ -155,7 +159,6 @@ class Stationary(Kern):
         each row of X and X2, or between each pair of rows of X if X2 is None.
         """
         if X2 is None:
-#            import pdb; pdb.set_trace()
             Xsq = np.sum(np.square(X),1)
             r2 = -2.*tdot(X) + (Xsq[:,None] + Xsq[None,:])
             util.diag.view(r2)[:,]= 0. # force diagonal to be zero: sometimes numerically a little negative

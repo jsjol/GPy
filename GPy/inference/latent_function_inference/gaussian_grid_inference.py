@@ -22,7 +22,6 @@ import numpy as np
 from .grid_posterior import GridPosterior
 from ...kern import Prod, RBF
 from . import LatentFunctionInference
-import pdb
 
 
 class GaussianGridInference(LatentFunctionInference):
@@ -56,25 +55,9 @@ class GaussianGridInference(LatentFunctionInference):
         xg = factor_grid(X, self.grid_dims)
         kern_factors = _get_factorized_kernel(kern, self.grid_dims)
 
-        D = len(kern_factors)
-        Kds = [kern_factors[d].K(xg[d]) for d in range(D)]
+        Kds = [kern_factors[d].K(xg[d]) for d in range(len(kern_factors))]
 
-        Qs = []
-        V_kron = 1  # kronecker product of eigenvalues
-        for d in range(D):  # Saatci 1-4
-            [V, Q] = np.linalg.eigh(Kds[d])
-            V_kron = np.kron(V_kron, V)
-            Qs.append(Q)
-
-        noise = likelihood.variance + 1e-8
-
-        alpha_kron = kron_mvprod([Q.T for Q in Qs], Y)  # Saatci 5 #
-        V_kron = V_kron.reshape(-1, 1)
-        alpha_kron = alpha_kron / (V_kron + noise)  # Saatci 6
-        alpha_kron = kron_mvprod(Qs, alpha_kron)  # Saatci 7
-
-        posterior = GridPosterior(alpha_kron=alpha_kron, Qs=Qs,
-                                  V_kron=V_kron, noise=noise)
+        posterior = self.compute_posterior(likelihood, Kds, Y)
 
         log_likelihood = -0.5 * (np.dot(Y.T, posterior.alpha) +
                                  np.sum((np.log(posterior.V_kron +
@@ -85,6 +68,24 @@ class GaussianGridInference(LatentFunctionInference):
                                                kern_factors, xg, Kds)
 
         return (posterior, log_likelihood, gradient_dict)
+
+    def compute_posterior(self, likelihood, Kds, Y):
+        Qs = []
+        V_kron = 1  # kronecker product of eigenvalues
+        for K in Kds:  # Saatci 1-4
+            [V, Q] = np.linalg.eigh(K)
+            V_kron = np.kron(V_kron, V)
+            Qs.append(Q)
+
+        noise = likelihood.variance + 1e-8
+
+        alpha_kron = kron_mvprod([Q.T for Q in Qs], Y)  # Saatci 5 #
+        V_kron = V_kron.reshape(-1, 1)
+        alpha_kron = alpha_kron / (V_kron + noise)  # Saatci 6
+        alpha_kron = kron_mvprod(Qs, alpha_kron)  # Saatci 7
+
+        return GridPosterior(alpha_kron=alpha_kron, Qs=Qs,
+                             V_kron=V_kron, noise=noise)
 
     def compute_gradients(self, posterior, kern, kern_factors, xg, Kds):
         D = len(kern_factors)
@@ -167,13 +168,11 @@ def list_in_list(element, list_to_search):
 
 
 def _append(kern_factored, kern_to_append):
-#    kern_to_append = _set_active_dims_to_none(kern_to_append)
     kern_to_append = _update_sliced_active_dims(kern_to_append)
     return kern_factored.append(kern_to_append)
 
 
 def _update_sliced_active_dims(k, shift=None):
-
     if k.active_dims is None:
         k.active_dims = np.arange(k.input_dim, dtype=int)
     else:
@@ -185,16 +184,8 @@ def _update_sliced_active_dims(k, shift=None):
 
     if isinstance(k, Prod):
         for i, kern in enumerate(k.parts):
-            k.parts[i] = _set_active_dims_to_none(kern)
+            k.parts[i] = _update_sliced_active_dims(k.parts[i], shift=shift)
 
-    return k
-
-
-def _set_active_dims_to_none(k):
-    # For correct behavior when passing pre-sliced Xs
-    # TODO: handle these details elsewhere (part of Kern.__init__)
-    k.active_dims = np.arange(k.input_dim, dtype=int)
-    k._all_dims_active = k.active_dims
     return k
 
 

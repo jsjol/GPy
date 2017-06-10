@@ -23,6 +23,7 @@ class KernCallsViaSlicerMeta(ParametersChangedMeta):
         put_clean(dct, 'phi', _slice_Kdiag)
         put_clean(dct, 'update_gradients_full', _slice_update_gradients_full)
         put_clean(dct, 'update_gradients_diag', _slice_update_gradients_diag)
+        put_clean(dct, 'dK_dParams', _slice_dK_dParams)
         put_clean(dct, 'gradients_X', _slice_gradients_X)
         put_clean(dct, 'gradients_X_X2', _slice_gradients_X)
         put_clean(dct, 'gradients_XX', _slice_gradients_XX)
@@ -108,6 +109,14 @@ def _slice_update_gradients_diag(f):
     def wrap(self, dL_dKdiag, X):
         with _Slice_wrap(self, X, None) as s:
             ret = f(self, dL_dKdiag, s.X)
+        return ret
+    return wrap
+
+def _slice_dK_dParams(f):
+    @wraps(f)
+    def wrap(self, X, X2=None):
+        with _Slice_wrap(self, X, X2) as s:
+            ret = f(self, s.X, s.X2)
         return ret
     return wrap
 
