@@ -70,8 +70,7 @@ from .fitc import FITC
 from .pep import PEP
 from .var_dtc_parallel import VarDTC_minibatch
 from .var_gauss import VarGauss
-from .gaussian_grid_inference import (GaussianGridInference,
-                                      sequential_tensor_dot)
+from .gaussian_grid_inference import GaussianGridInference
 
 
 # class FullLatentFunctionData(object):

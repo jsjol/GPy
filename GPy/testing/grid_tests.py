@@ -5,60 +5,8 @@ import unittest
 import numpy as np
 import GPy
 from GPy.inference.latent_function_inference.gaussian_grid_inference \
-    import (_get_factorized_kernel, factor_grid, kron_mvprod,
-            sequential_tensor_dot)
-from GPy.core.gp_grid import (_expand, kron_mmprod)
-
-
-class KroneckerTests(unittest.TestCase):
-    def setUp(self):
-        np.random.seed(0)
-        self.A = np.random.randn(3, 3)
-        self.B = np.random.randn(4, 4)
-        self.kronAB = np.kron(self.A, self.B)
-        self.x = np.random.randn(self.A.shape[1], 1)
-        self.y = np.random.randn(self.A.shape[1] * self.B.shape[1], 1)
-
-    def test_ordinary_mvprod(self):
-        expected_mv_result = np.dot(self.A, self.x)
-        kron_mv_result = kron_mvprod([self.A], self.x)
-        np.testing.assert_array_almost_equal(expected_mv_result,
-                                             kron_mv_result)
-
-    def test_kron_mvprod(self):
-        expected = np.dot(self.kronAB, self.y)
-        kron_mv_result = kron_mvprod([self.A, self.B], self.y)
-        np.testing.assert_array_almost_equal(kron_mv_result,
-                                             expected)
-
-    def test_kron_mmprod(self):
-        Y = np.random.randn(self.A.shape[1] * self.B.shape[1], 3)
-        expected = np.dot(self.kronAB, Y)
-        kron_mm_result = kron_mmprod([self.A, self.B], Y)
-        np.testing.assert_almost_equal(kron_mm_result, expected)
-
-
-class SequentialTensorDotTest(unittest.TestCase):
-    def setUp(self):
-        np.random.seed(0)
-        self.A = np.random.randn(2, 3)
-        self.B = np.random.randn(4, 5)
-        self.kronAB = np.kron(self.A, self.B)
-        self.x = np.random.randn(self.A.shape[1])
-        self.y = np.random.randn(self.A.shape[1], self.B.shape[1])
-
-    def test_ordinary_mvprod(self):
-        expected_mv_result = np.dot(self.A, self.x)
-        tensor_dot_result = sequential_tensor_dot([self.A], self.x)
-        np.testing.assert_array_almost_equal(tensor_dot_result,
-                                             expected_mv_result)
-
-    def test_kron_mvprod(self):
-        expected = np.dot(self.kronAB, self.y.flatten())
-        expected = np.reshape(expected, (self.A.shape[0], self.B.shape[0]))
-        tensor_dot_result = sequential_tensor_dot([self.A, self.B], self.y)
-        np.testing.assert_array_almost_equal(tensor_dot_result,
-                                             expected)
+    import (_get_factorized_kernel, factor_grid)
+from GPy.core.gp_grid import _expand
 
 
 class GridModelIdentityTest(unittest.TestCase):

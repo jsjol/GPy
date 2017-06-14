@@ -21,10 +21,10 @@ import numpy as np
 import scipy.linalg as sp
 from .gp import GP
 from .parameterization.param import Param
-from ..inference.latent_function_inference import (gaussian_grid_inference,
-                                                   sequential_tensor_dot)
+from ..inference.latent_function_inference import gaussian_grid_inference
 from .. import likelihoods
 from ..kern import Prod, RBF
+from ..util.linalg import (sequential_tensor_dot, kron_mmprod)
 
 import logging
 from GPy.inference.latent_function_inference.posterior import Posterior
@@ -134,29 +134,6 @@ class GpGrid(GP):
             var = var.reshape(-1, 1)
 
         return mu, var
-
-
-def kron_mmprod(A, B):
-    count = 0
-    D = len(A)
-    for b in (B.T):
-        x = b
-        N = 1
-        G = np.zeros(D)
-        for d in range(D):
-            G[d] = len(A[d])
-        N = np.prod(G)
-        for d in range(D-1, -1, -1):
-            X = np.reshape(x, (G[d], np.round(N/G[d])), order='F')
-            Z = np.dot(A[d], X)
-            Z = Z.T
-            x = np.reshape(Z, (-1, 1), order='F')
-        if (count == 0):
-            result = x
-        else:
-            result = np.column_stack((result, x))
-        count+=1
-    return result
 
 
 def _expand(kern):

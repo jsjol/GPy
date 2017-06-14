@@ -22,6 +22,7 @@ import numpy as np
 from .grid_posterior import GridPosterior
 from ...kern import Prod, RBF
 from . import LatentFunctionInference
+from ...util.linalg import kron_mvprod
 
 
 class GaussianGridInference(LatentFunctionInference):
@@ -225,33 +226,6 @@ def unique_rows(X):
     X_view = np.ascontiguousarray(X).view(np.dtype((np.void, X.dtype.itemsize * X.shape[1])))
     _, idx = np.unique(X_view, return_index=True)
     return X[sorted(idx)]  # Sorting necessary to preserve ordering
-
-
-def sequential_tensor_dot(A_seq, B):
-    B = np.reshape(B, [A.shape[1] for A in A_seq])
-    for A in reversed(A_seq):
-        B = np.tensordot(A, B, axes=(1, -1))
-    return B
-
-
-def kron_mvprod(A, b):
-    """
-        Perform the matrix-vector multiplication A*b where the matrix A is
-        given by a Kronecker product.
-    """
-    x = b
-    N = 1
-    D = len(A)
-    G = np.zeros((D, 1))
-    for d in range(0, D):
-        G[d] = len(A[d])
-    N = np.prod(G)
-    for d in range(D-1, -1, -1):
-        X = np.reshape(x, (G[d], np.round(N/G[d])), order='F')
-        Z = np.dot(A[d], X)
-        Z = Z.T
-        x = np.reshape(Z, (-1, 1), order='F')
-    return x
 
 
 def _dL_dParam_from_parts(kappa_factors, posterior):

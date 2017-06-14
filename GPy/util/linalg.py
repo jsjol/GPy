@@ -413,3 +413,27 @@ def ijk_ljk_to_ilk(A, B):
     [np.dot(A[:,:,i], B[:,:,i].T, out=res[i,:,:]) for i in range(A.shape[-1])]
     res = res.swapaxes(0, 2).swapaxes(0,1)
     return res
+
+
+def sequential_tensor_dot(A_seq, B):
+    B = np.reshape(B, [A.shape[1] for A in A_seq])
+    for A in reversed(A_seq):
+        B = np.tensordot(A, B, axes=(1, -1))
+    return B
+
+
+def kron_mvprod(A, b):
+    """
+        Perform the matrix-vector multiplication A*b where the matrix A is
+        given by a Kronecker product.
+    """
+    return sequential_tensor_dot(A, b).reshape(-1, 1)
+
+
+def kron_mmprod(A, B):
+    m = np.prod([a.shape[0] for a in A])
+    n = B.shape[1]
+    result = np.zeros((m, n))
+    for i, b in enumerate(B.T):
+        result[:, i] = sequential_tensor_dot(A, b).flatten()
+    return result
