@@ -3,52 +3,60 @@
 
 
 import numpy as np
+from functools import reduce
+
 
 class GridPosterior(object):
     """
     Specially intended for the Grid Regression case
-    An object to represent a Gaussian posterior over latent function values, p(f|D).
+    An object to represent a Gaussian posterior over
+    latent function values, p(f|D).
 
     The purpose of this class is to serve as an interface between the inference
     schemes and the model classes.
 
     """
-    def __init__(self, alpha_kron, Qs, V_kron, noise=None):
+    def __init__(self, alpha_kron, Qs, Vs, V_kron=None, noise=None):
         """
-        alpha_kron : 
-        Qs : eigen vectors resulting from decomposition of single dimension covariance matrices
-        V_kron : kronecker product of eigenvalues reulting decomposition of single dimension covariance matrices
+        alpha_kron : woodbury vector
+        Qs : list of eigenvector matrices resulting from separate decomposition
+             of covariance matrices in a Kronecker product
+        V : corresponding eigenvalues
         """
 
         self._alpha_kron = alpha_kron
         self._qs = Qs
+        self._vs = Vs
         self._v_kron = V_kron
         self._noise = noise
 
     @property
     def alpha(self):
-        """
-        """
         return self._alpha_kron
 
     @property
     def Qs(self):
         """
-        array of eigenvectors resulting for single dimension covariance
+        list of eigenvectors
         """
         return self._qs
 
     @property
+    def Vs(self):
+        """
+        list of eigenvalues
+        """
+        return self._vs
+
+    @property
     def V_kron(self):
         """
-        kronecker product of eigenvalues s
+        kronecker product of eigenvalues
         """
+        if self._v_kron is None:
+            self._v_kron = reduce(np.kron, self._vs).reshape(-1, 1)
         return self._v_kron
 
     @property
     def noise(self):
-        """
-        kronecker product of eigenvalues s
-        """
         return self._noise
-    

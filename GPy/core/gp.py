@@ -38,12 +38,17 @@ class GP(Model):
     def __init__(self, X, Y, kernel, likelihood, mean_function=None, inference_method=None, name='gp', Y_metadata=None, normalizer=False):
         super(GP, self).__init__(name)
 
-        assert X.ndim == 2
-        if isinstance(X, (ObsAr, VariationalPosterior)):
-            self.X = X.copy()
-        else: self.X = ObsAr(X)
-
-        self.num_data, self.input_dim = self.X.shape
+        if isinstance(X, list):
+            self.X = []
+            self.num_data = 1
+            self.input_dim = 0
+            for X_d in X:
+                self.X.append(_toObsAr(X_d))
+                self.num_data *= X_d.shape[0]
+                self.input_dim += X_d.shape[1]
+        else:
+            self.X = _toObsAr(X)
+            self.num_data, self.input_dim = self.X.shape
 
         assert Y.ndim == 2
         logger.info("initializing Y")
@@ -83,7 +88,7 @@ class GP(Model):
         assert isinstance(likelihood, likelihoods.Likelihood)
         self.likelihood = likelihood
 
-        if self.kern._effective_input_dim != self.X.shape[1]:
+        if self.kern._effective_input_dim != self.input_dim:
             warnings.warn("Your kernel has a different input dimension {} then the given X dimension {}. Be very sure this is what you want and you have not forgotten to set the right input dimenion in your kernel".format(self.kern._effective_input_dim, self.X.shape[1]))
 
         #handle the mean function
@@ -616,3 +621,11 @@ class GP(Model):
         mu_star, var_star = self._raw_predict(x_test)
         return self.likelihood.log_predictive_density_sampling(y_test, mu_star, var_star, Y_metadata=Y_metadata, num_samples=num_samples)
 
+
+def _toObsAr(X):
+    assert X.ndim == 2
+
+    if isinstance(X, (ObsAr, VariationalPosterior)):
+        return X.copy()
+    else:
+        return ObsAr(X)

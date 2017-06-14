@@ -21,7 +21,8 @@ import numpy as np
 import scipy.linalg as sp
 from .gp import GP
 from .parameterization.param import Param
-from ..inference.latent_function_inference import gaussian_grid_inference
+from ..inference.latent_function_inference import (gaussian_grid_inference,
+                                                   sequential_tensor_dot)
 from .. import likelihoods
 from ..kern import Prod, RBF
 
@@ -48,7 +49,6 @@ class GpGrid(GP):
 
         kernel = _expand(kernel.copy())
 
-        #pick a sensible inference method
         inference_method = gaussian_grid_inference.GaussianGridInference(grid_dims)
 
         GP.__init__(self, X, Y, kernel, likelihood, inference_method=inference_method, name=name, Y_metadata=Y_metadata, normalizer=normalizer)
@@ -67,33 +67,71 @@ class GpGrid(GP):
         self.likelihood.update_gradients(self.grad_dict['dL_dthetaL'])
         self.kern.update_gradients_direct(self.grad_dict['dL_dParams'])
 
-    def _raw_predict(self, Xnew, full_cov=False, kern=None):
+    def _raw_predict(self, Xnew, full_cov=False, kern=None, compute_var=True):
         """
         Make a prediction for the latent function values
         """
         if kern is None:
             kern = self.kern
 
+        # Define aliases for convenience
+        noise = self.likelihood.variance
+        Qs = self.posterior.Qs
+        V_kron = self.posterior.V_kron
+
         # n = X.shape[0] (number of training samples)
         # m = Xnew.shape[0] (number of test samples)
 
-        # compute mean predictions
-        Knm = kern.K(self.X, Xnew)
-        mu = np.dot(Knm.T, self.posterior.alpha)
-        mu = mu.reshape(-1, 1)
+        if isinstance(self.X, list) and isinstance(Xnew, list):
+            if not (len(self.X) == len(self.inference_method.grid_dims) and
+                    len(Xnew) == len(self.inference_method.grid_dims)):
+                raise Exception("When specifying X and Xnew as axes, \
+                                their dimensions need to match \
+                                those of grid_dims.")
 
-        # compute variance of predictions
-        noise = self.likelihood.variance
-        V_kron = self.posterior.V_kron
-        Qs = self.posterior.Qs
-        A = kron_mmprod([Q.T for Q in Qs], Knm)
-        V_kron = V_kron.reshape(-1, 1)      
-        A = A / (V_kron + noise)
-        A = kron_mmprod(Qs, A)
+            # TODO: reduce memory use by looping over m - use generator?
+            Knm, _ = self.inference_method.get_separate_covariances(
+                        kern,
+                        xg=self.X,
+                        xg2=Xnew)
 
-        Kmm = kern.K(Xnew)
-        var = np.diag(Kmm - np.dot(Knm.T, A)).copy()
-        var = var.reshape(-1, 1)
+            mu = sequential_tensor_dot([K.T for K in Knm],
+                                       self.posterior.alpha)
+            mu = mu.reshape(-1, 1)
+
+            if not compute_var:
+                return mu
+
+            A = (np.dot(Qs[i].T, Knm[i]) for i in range(len(Knm)))
+            A = reduce(np.kron, A)
+
+            D = np.sqrt(1 / (V_kron + noise))
+            A = D * A
+
+            Kmm, _ = self.inference_method.get_separate_covariances(
+                        kern,
+                        xg=Xnew)
+            Kmm = reduce(np.kron, Kmm)
+
+            var = np.diag(Kmm) - np.diag(np.dot(A.T, A))
+            var = var.reshape(-1, 1)
+        else:
+            # compute mean predictions
+            Knm = kern.K(self.X, Xnew)
+            mu = np.dot(Knm.T, self.posterior.alpha)
+            mu = mu.reshape(-1, 1)
+
+            if not compute_var:
+                return mu
+
+            # compute variance of predictions
+            A = kron_mmprod([Q.T for Q in Qs], Knm)
+            A = A / (V_kron + noise)
+            A = kron_mmprod(Qs, A)
+
+            Kmm = kern.K(Xnew)
+            var = np.diag(Kmm - np.dot(Knm.T, A)).copy()
+            var = var.reshape(-1, 1)
 
         return mu, var
 

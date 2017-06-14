@@ -94,13 +94,6 @@ class Prod(CombinationKernel):
         Ks = [part.K(X, X2) for part in self.parts]
         out = []
         for i, part in enumerate(self.parts):
-#            if part.active_dims is None:
-#                X_part = X
-#            else:
-#                # Reshape needed to preserve dimensionality if
-#                # part.active_dims is one-dimensional
-#                X_part = X[:, part.active_dims].reshape(X.shape[0], -1)
-
             part_dK_dParams = part.dK_dParams(X, X2)      
             for j in range(len(part.param_array)):
                 dK_dParam_ij = np.ones_like(Ks[0])  # N x M
@@ -109,7 +102,6 @@ class Prod(CombinationKernel):
                         dK_dParam_ij *= part_dK_dParams[:, :, j]
                     else:
                         dK_dParam_ij *= Ks[d]
-#                dK_dParam_ij = part_dK_dParams[:, :, j]
                 out.append(dK_dParam_ij)
 
         return np.stack(out, -1)

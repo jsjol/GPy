@@ -5,7 +5,8 @@ import unittest
 import numpy as np
 import GPy
 from GPy.inference.latent_function_inference.gaussian_grid_inference \
-    import (_get_factorized_kernel, factor_grid, kron_mvprod, _compute_gamma_d)
+    import (_get_factorized_kernel, factor_grid, kron_mvprod,
+            sequential_tensor_dot)
 from GPy.core.gp_grid import (_expand, kron_mmprod)
 
 
@@ -15,8 +16,8 @@ class KroneckerTests(unittest.TestCase):
         self.A = np.random.randn(3, 3)
         self.B = np.random.randn(4, 4)
         self.kronAB = np.kron(self.A, self.B)
-        self.x = np.random.randn(self.A.shape[0], 1)
-        self.y = np.random.randn(self.A.shape[0] * self.B.shape[0], 1)
+        self.x = np.random.randn(self.A.shape[1], 1)
+        self.y = np.random.randn(self.A.shape[1] * self.B.shape[1], 1)
 
     def test_ordinary_mvprod(self):
         expected_mv_result = np.dot(self.A, self.x)
@@ -31,10 +32,33 @@ class KroneckerTests(unittest.TestCase):
                                              expected)
 
     def test_kron_mmprod(self):
-        Y = np.random.randn(self.A.shape[0] * self.B.shape[0], 3)
+        Y = np.random.randn(self.A.shape[1] * self.B.shape[1], 3)
         expected = np.dot(self.kronAB, Y)
         kron_mm_result = kron_mmprod([self.A, self.B], Y)
         np.testing.assert_almost_equal(kron_mm_result, expected)
+
+
+class SequentialTensorDotTest(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(0)
+        self.A = np.random.randn(2, 3)
+        self.B = np.random.randn(4, 5)
+        self.kronAB = np.kron(self.A, self.B)
+        self.x = np.random.randn(self.A.shape[1])
+        self.y = np.random.randn(self.A.shape[1], self.B.shape[1])
+
+    def test_ordinary_mvprod(self):
+        expected_mv_result = np.dot(self.A, self.x)
+        tensor_dot_result = sequential_tensor_dot([self.A], self.x)
+        np.testing.assert_array_almost_equal(tensor_dot_result,
+                                             expected_mv_result)
+
+    def test_kron_mvprod(self):
+        expected = np.dot(self.kronAB, self.y.flatten())
+        expected = np.reshape(expected, (self.A.shape[0], self.B.shape[0]))
+        tensor_dot_result = sequential_tensor_dot([self.A, self.B], self.y)
+        np.testing.assert_array_almost_equal(tensor_dot_result,
+                                             expected)
 
 
 class GridModelIdentityTest(unittest.TestCase):
@@ -356,6 +380,72 @@ class GridModelProdTestAdvanced(unittest.TestCase):
 
     def test_prediction_match(self):
         np.testing.assert_almost_equal(self.m.predict(self.Xs),
+                                       self.m2.predict(self.Xs))
+
+
+class GridModelFactoredXTest(unittest.TestCase):
+    def setUp(self):
+        np.random.seed(0)
+        x = np.arange(3).reshape(3, 1)
+        y = np.arange(4).reshape(2, 2)
+        self.xg = [x, y]
+        self.grid_dims = [[0], [1, 2]]
+        self.X = np.array([[0, 0, 1],
+                           [0, 2, 3],
+                           [1, 0, 1],
+                           [1, 2, 3],
+                           [2, 0, 1],
+                           [2, 2, 3]])
+        self.xgs = [np.array([[0.5], [1.5]]),
+                    np.array([[0, 2], [1, 1]])]
+        self.Xs = np.array([[0.5, 0, 2],
+                            [0.5, 1, 1],
+                            [1.5, 0, 2],
+                            [1.5, 1, 1]])
+        self.Y = np.random.randn(self.X.shape[0], 1)
+
+        self.kernel = (GPy.kern.RBF(input_dim=1, active_dims=[0],
+                       variance=2, lengthscale=2) *
+                       GPy.kern.Exponential(input_dim=2, active_dims=[1, 2],
+                       variance=3, lengthscale=[3]))
+        self.kernel2 = self.kernel.copy()
+
+        self.m = GPy.models.GPRegressionGrid(self.xg, self.Y, self.kernel,
+                                             grid_dims=self.grid_dims)
+        self.m2 = GPy.models.GPRegression(self.X, self.Y, self.kernel2)
+
+    def test_alpha_match(self):
+        np.testing.assert_almost_equal(self.m.posterior.alpha,
+                                       self.m2.posterior.woodbury_vector)
+
+    def test_gradient_match(self):
+        m_variance_gradient = [part.variance.gradient
+                               for part in self.m.kern.parts]
+        m_lengthscale_gradient = [part.lengthscale.gradient
+                                  for part in self.m.kern.parts]
+
+        m2_variance_gradient = [part.variance.gradient
+                                for part in self.m2.kern.parts]
+        m2_lengthscale_gradient = [part.lengthscale.gradient
+                                   for part in self.m2.kern.parts]
+
+        np.testing.assert_array_almost_equal(m_variance_gradient,
+                                             m2_variance_gradient)
+        np.testing.assert_array_almost_equal(m_lengthscale_gradient,
+                                             m2_lengthscale_gradient)
+        np.testing.assert_almost_equal(self.m.likelihood.variance.gradient,
+                                       self.m2.likelihood.variance.gradient)
+
+    def test_likelihood(self):
+        np.testing.assert_almost_equal(self.m.likelihood.variance,
+                                       self.m2.likelihood.variance)
+        np.testing.assert_almost_equal(self.m.log_likelihood(),
+                                       self.m2.log_likelihood())
+
+    def test_prediction_match(self):
+        mu, var = self.m.predict(self.xgs)
+        mu2, var2 = self.m2.predict(self.Xs)
+        np.testing.assert_almost_equal(self.m.predict(self.xgs),
                                        self.m2.predict(self.Xs))
 
 

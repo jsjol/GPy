@@ -47,44 +47,59 @@ class GaussianGridInference(LatentFunctionInference):
         # TODO: update checks above. The case when len(grid_dims) == 1 does not 
         # not benefit from Grid inference, but could be useful for testing
 
-        if self.grid_dims is None:
-            self.grid_dims = [[d] for d in range(X.shape[1])]
+#        if self.grid_dims is None:
+#            self.grid_dims = [[d] for d in range(X.shape[1])]
 
-        N = X.shape[0]  # number of training points
+        if isinstance(X, list):
+            if self.grid_dims is None:
+                raise Exception("Can't infer grid_dims, please specify.")
+            xg = X
+        else:
+            if self.grid_dims is None:
+                self.grid_dims = [[d] for d in range(X.shape[1])]
+            xg = factor_grid(X, self.grid_dims)
 
-        xg = factor_grid(X, self.grid_dims)
-        kern_factors = _get_factorized_kernel(kern, self.grid_dims)
-
-        Kds = [kern_factors[d].K(xg[d]) for d in range(len(kern_factors))]
+        Kds, kern_factors = self.get_separate_covariances(kern, xg)
 
         posterior = self.compute_posterior(likelihood, Kds, Y)
 
         log_likelihood = -0.5 * (np.dot(Y.T, posterior.alpha) +
                                  np.sum((np.log(posterior.V_kron +
                                                 posterior.noise))) +
-                                 N*np.log(2*np.pi))  # Saatci 8
+                                 Y.shape[0]*np.log(2*np.pi))  # Saatci 8
 
         gradient_dict = self.compute_gradients(posterior, kern,
                                                kern_factors, xg, Kds)
 
         return (posterior, log_likelihood, gradient_dict)
 
+    def get_separate_covariances(self, kern, xg, xg2=None):
+        kern_factors = _get_factorized_kernel(kern, self.grid_dims)
+
+        if xg2 is None:
+            xg2 = xg
+
+        Kds = [kern_factors[d].K(xg[d], xg2[d])
+               for d in range(len(kern_factors))]
+
+        return Kds, kern_factors
+
     def compute_posterior(self, likelihood, Kds, Y):
+        Vs = []
         Qs = []
-        V_kron = 1  # kronecker product of eigenvalues
         for K in Kds:  # Saatci 1-4
             [V, Q] = np.linalg.eigh(K)
-            V_kron = np.kron(V_kron, V)
+            Vs.append(V)
             Qs.append(Q)
 
         noise = likelihood.variance + 1e-8
+        V_kron = reduce(np.kron, Vs).reshape(-1, 1)
 
         alpha_kron = kron_mvprod([Q.T for Q in Qs], Y)  # Saatci 5 #
-        V_kron = V_kron.reshape(-1, 1)
         alpha_kron = alpha_kron / (V_kron + noise)  # Saatci 6
         alpha_kron = kron_mvprod(Qs, alpha_kron)  # Saatci 7
 
-        return GridPosterior(alpha_kron=alpha_kron, Qs=Qs,
+        return GridPosterior(alpha_kron=alpha_kron, Qs=Qs, Vs=Vs,
                              V_kron=V_kron, noise=noise)
 
     def compute_gradients(self, posterior, kern, kern_factors, xg, Kds):
@@ -210,6 +225,13 @@ def unique_rows(X):
     X_view = np.ascontiguousarray(X).view(np.dtype((np.void, X.dtype.itemsize * X.shape[1])))
     _, idx = np.unique(X_view, return_index=True)
     return X[sorted(idx)]  # Sorting necessary to preserve ordering
+
+
+def sequential_tensor_dot(A_seq, B):
+    B = np.reshape(B, [A.shape[1] for A in A_seq])
+    for A in reversed(A_seq):
+        B = np.tensordot(A, B, axes=(1, -1))
+    return B
 
 
 def kron_mvprod(A, b):
