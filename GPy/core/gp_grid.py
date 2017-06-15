@@ -67,6 +67,45 @@ class GpGrid(GP):
         self.likelihood.update_gradients(self.grad_dict['dL_dthetaL'])
         self.kern.update_gradients_direct(self.grad_dict['dL_dParams'])
 
+    def predict(self, Xnew, full_cov=False, Y_metadata=None, kern=None,
+                likelihood=None, include_likelihood=True, compute_var=True):
+
+        if compute_var:
+            return super(GpGrid, self).predict(
+                            Xnew,
+                            full_cov=full_cov,
+                            Y_metadata=Y_metadata,
+                            kern=kern,
+                            likelihood=likelihood,
+                            include_likelihood=include_likelihood)
+        else:
+            mu = self._raw_predict(Xnew, full_cov=full_cov,
+                                   kern=kern, compute_var=False)
+    
+            if include_likelihood:
+                if likelihood is None:
+                    likelihood = self.likelihood
+                mu = likelihood.predictive_values(mu, var=None,
+                                                  full_cov=full_cov,
+                                                  Y_metadata=Y_metadata)
+    
+            if self.normalizer is not None:
+                mu = self.normalizer.inverse_mean(mu)
+    
+            return mu
+
+    def predict_noiseless(self,  Xnew, full_cov=False, Y_metadata=None,
+                          kern=None, compute_var=True):
+        if compute_var:
+            return super(GpGrid, self).predict_noiseless(Xnew,
+                                                         full_cov,
+                                                         Y_metadata,
+                                                         kern)
+        else:
+            return self.predict(Xnew, full_cov, Y_metadata=None, kern=kern,
+                                likelihood=None, include_likelihood=False,
+                                compute_var=False)
+
     def _raw_predict(self, Xnew, full_cov=False, kern=None, compute_var=True):
         """
         Make a prediction for the latent function values
